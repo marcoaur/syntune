@@ -49,10 +49,11 @@ jobs:
             'dist/Syntune-Portable.exe',
             'dist/latest.yml'
           )
-          $exists = $true
-          try { gh release view $tag | Out-Null } catch { $exists = $false }
-          if (-not $exists) {
+          # try/catch não captura exit code de exe em pwsh: usar $LASTEXITCODE
+          gh release view $tag 2>$null | Out-Null
+          if ($LASTEXITCODE -ne 0) {
             gh release create $tag @assets --title "Syntune $tag" --generate-notes
           } else {
             gh release upload $tag @assets --clobber
           }
+          if ($LASTEXITCODE -ne 0) { exit 1 }
