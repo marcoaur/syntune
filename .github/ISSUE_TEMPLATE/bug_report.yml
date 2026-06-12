@@ -1,0 +1,55 @@
+name: 🐛 Bug report
+description: Something broke? Tell us so we can fix it.
+labels: [bug]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Syntune version
+      description: Settings shows it, or check the release you downloaded.
+      placeholder: "2.0.5"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install
+    attributes:
+      label: Install type
+      options:
+        - Installer (Syntune-Setup.exe)
+        - Portable (Syntune-Portable.exe)
+        - Running from source (npm start)
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Windows version
+      placeholder: "Windows 11 24H2"
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open the app
+        2. Paste a link / click X
+        3. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected vs. what happened
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Job-card message or error text (if any)
+      description: The exact text shown in the job card, toast or console helps a lot.

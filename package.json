@@ -45,9 +45,17 @@
     },
     "portable": {
       "artifactName": "Syntune-Portable.exe"
-    }
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "marcoaur",
+        "repo": "syntune"
+      }
+    ]
   },
   "dependencies": {
+    "electron-updater": "^6.8.9",
     "node-id3": "^0.2.6",
     "yt-dlp-wrap": "^2.3.12"
   },

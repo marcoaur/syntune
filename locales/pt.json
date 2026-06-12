@@ -105,6 +105,12 @@
   "fields.comment": "Comentário",
   "fields.lyrics": "Letra",
 
+  "editor.previewLyrics": "Testar (Tocando agora)",
+  "editor.saveAndPublish": "Salvar e contribuir",
+  "editor.searchLyrics": "Buscar letra na comunidade",
+  "editor.editLyrics": "Editar letra sincronizada",
+  "editor.addLyrics": "Adicionar nova letra",
+  "editor.lyricsHint": "Sincronizada via LRCLIB.net",
   "editor.editDetails": "Editar detalhes",
   "editor.done": "Concluir e salvar",
   "editor.coverPasteTitle": "Clique e cole uma imagem com Ctrl+V",

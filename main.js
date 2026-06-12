@@ -134,6 +134,19 @@ function protocolPath(url, scheme) {
 
 const CORS_HEADERS = { 'Access-Control-Allow-Origin': '*' };
 
+// ---------- Auto-update (electron-updater via GitHub Releases) ----------
+// Baixa a nova versão em segundo plano, notifica o usuário e instala ao fechar.
+// Só roda no app instalado (NSIS): em dev e no build portátil o updater não se aplica.
+function setupAutoUpdate() {
+  if (!app.isPackaged || process.env.PORTABLE_EXECUTABLE_DIR) return;
+  let autoUpdater;
+  try { ({ autoUpdater } = require('electron-updater')); } catch { return; }
+  autoUpdater.on('error', (e) => console.warn('[autoUpdate]', e && e.message));
+  autoUpdater.checkForUpdatesAndNotify().catch(() => { /* sem rede: tenta na próxima */ });
+  // re-verifica a cada 4 horas em sessões longas
+  setInterval(() => autoUpdater.checkForUpdatesAndNotify().catch(() => {}), 4 * 60 * 60 * 1000);
+}
+
 app.whenReady().then(() => {
   protocol.handle('mp3file', async (request) => {
     const filePath = protocolPath(request.url, 'mp3file');
@@ -176,6 +189,7 @@ app.whenReady().then(() => {
   loadGeminiUsage(); // restaura a contagem diária (RPD) do config.json
   createWindow();
   startDevicePolling(); // monitora armazenamentos removíveis (MP4/pendrive)
+  setupAutoUpdate();    // busca atualizações nas releases do GitHub
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });

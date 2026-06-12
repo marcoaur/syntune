@@ -42,11 +42,17 @@ jobs:
         shell: pwsh
         run: |
           $tag = "v${{ steps.ver.outputs.version }}"
+          # latest.yml + blockmap: metadados do electron-updater (auto-update do app)
+          $assets = @(
+            'dist/Syntune-Setup.exe',
+            'dist/Syntune-Setup.exe.blockmap',
+            'dist/Syntune-Portable.exe',
+            'dist/latest.yml'
+          )
           $exists = $true
           try { gh release view $tag | Out-Null } catch { $exists = $false }
           if (-not $exists) {
-            gh release create $tag dist/Syntune-Setup.exe dist/Syntune-Portable.exe `
-              --title "Syntune $tag" --generate-notes
+            gh release create $tag @assets --title "Syntune $tag" --generate-notes
           } else {
-            gh release upload $tag dist/Syntune-Setup.exe dist/Syntune-Portable.exe --clobber
+            gh release upload $tag @assets --clobber
           }

@@ -1,0 +1,36 @@
+# Análise de segurança estática (CodeQL) — roda em PRs, na develop/main
+# e semanalmente, cobrindo o JavaScript do projeto.
+name: CodeQL
+
+on:
+  push:
+    branches: [main, stg, develop]
+  pull_request:
+    branches: [main, stg, develop]
+  schedule:
+    - cron: '30 4 * * 1' # toda segunda, 04:30 UTC
+
+permissions:
+  security-events: write
+  contents: read
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: javascript
+          # só o código do app — node_modules/dist já são ignorados por padrão
+          paths: |
+            main.js
+            preload.js
+            i18n.js
+            sync-engine.js
+            sync-worker.js
+            renderer
+            scripts
+
+      - uses: github/codeql-action/analyze@v3
