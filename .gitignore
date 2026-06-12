@@ -1,0 +1,19 @@
+# Dependências (reinstaláveis via npm install)
+node_modules/
+
+# Artefatos de build — os instaladores são publicados como assets
+# nas Releases do GitHub, nunca commitados no repositório
+dist/
+
+# Logs e lixo de sistema operacional
+*.log
+npm-debug.log*
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Configuração local (contém chaves de API — nunca versionar)
+config.json
+
+# Configuracao local do Claude Code
+.claude/

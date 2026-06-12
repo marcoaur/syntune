@@ -1,0 +1,58 @@
+{
+  "name": "syntune",
+  "version": "2.0.5",
+  "description": "Organizador e player de música offline: enriquece MP3 com IA + dados musicais abertos e sincroniza a biblioteca com dispositivos portáteis",
+  "main": "main.js",
+  "author": "Marco",
+  "license": "GPL-3.0-only",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder",
+    "build": "node scripts/build.js"
+  },
+  "build": {
+    "appId": "com.marco.syntune",
+    "productName": "Syntune",
+    "compression": "maximum",
+    "electronLanguages": [
+      "pt-BR",
+      "pt-PT",
+      "en-US",
+      "en-GB"
+    ],
+    "files": [
+      "main.js",
+      "preload.js",
+      "sync-engine.js",
+      "sync-worker.js",
+      "i18n.js",
+      "locales/**/*",
+      "renderer/**/*",
+      "src/**/*"
+    ],
+    "win": {
+      "icon": "src/img/icone.ico",
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "nsis": {
+      "installerIcon": "src/img/icone.ico",
+      "uninstallerIcon": "src/img/icone.ico",
+      "installerHeaderIcon": "src/img/icone.ico",
+      "artifactName": "Syntune-Setup.exe"
+    },
+    "portable": {
+      "artifactName": "Syntune-Portable.exe"
+    }
+  },
+  "dependencies": {
+    "node-id3": "^0.2.6",
+    "yt-dlp-wrap": "^2.3.12"
+  },
+  "devDependencies": {
+    "electron": "^31.7.7",
+    "electron-builder": "^24.13.3"
+  }
+}
