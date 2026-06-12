@@ -1673,6 +1673,10 @@ ipcMain.handle('artist:image', async (_e, { name } = {}) => {
 
 const crypto = require('crypto');
 
+// Assinatura exigida pelo protocolo da API do Last.fm: api_sig = MD5 dos
+// parâmetros ordenados + secret (https://www.last.fm/api/authspec).
+// O MD5 aqui é imposição do serviço — trocar o algoritmo quebra a autenticação.
+// (Alerta CodeQL js/weak-cryptographic-algorithm dispensado como won't fix.)
 function lastfmSign(params, secret) {
   const keys = Object.keys(params).filter(k => k !== 'format' && k !== 'callback').sort();
   let str = '';
