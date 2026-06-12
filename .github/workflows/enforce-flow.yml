@@ -1,0 +1,27 @@
+# Trava o gitflow: PRs para main só vindos de stg; PRs para stg só vindos de develop.
+# PRs de contribuidores entram apenas em develop (qualquer branch de feature → develop).
+name: Enforce branch flow
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+
+jobs:
+  flow:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate PR source/target
+        env:
+          BASE: ${{ github.base_ref }}
+          HEAD: ${{ github.head_ref }}
+        run: |
+          echo "PR: $HEAD -> $BASE"
+          if [ "$BASE" = "main" ] && [ "$HEAD" != "stg" ]; then
+            echo "::error::PRs para main só podem vir de stg (fluxo: develop -> stg -> main)."
+            exit 1
+          fi
+          if [ "$BASE" = "stg" ] && [ "$HEAD" != "develop" ]; then
+            echo "::error::PRs para stg só podem vir de develop (fluxo: develop -> stg -> main)."
+            exit 1
+          fi
+          echo "Fluxo ok."
