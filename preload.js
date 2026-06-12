@@ -22,6 +22,11 @@ contextBridge.exposeInMainWorld('api', {
   // configuração
   getConfig: () => ipcRenderer.invoke('config:get'),
   setConfig: (cfg) => ipcRenderer.invoke('config:set', cfg),
+  onSecurityWarning: (cb) => ipcRenderer.on('security:plaintextWarning', () => cb()),
+
+  // auto-update
+  onUpdateReady: (cb) => ipcRenderer.on('update:ready', (_e, info) => cb(info)),
+  installUpdate: () => ipcRenderer.send('update:install'),
 
   // seleção de arquivos
   selectMp3: () => ipcRenderer.invoke('dialog:selectMp3'),

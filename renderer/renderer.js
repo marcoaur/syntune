@@ -111,6 +111,24 @@ function toast(message, type = '') {
   }, 3200);
 }
 
+// aviso do main: cofre de chaves do SO indisponível — segredos em plaintext
+window.api.onSecurityWarning(() => toast(t('security.plaintextWarning'), 'error'));
+
+// update baixado: badge na titlebar; clique fecha e instala a nova versão agora
+window.api.onUpdateReady((info) => {
+  const b = $('updateBadge');
+  if (!b) return;
+  const v = (info && info.version) ? 'v' + info.version : '';
+  b.textContent = t('update.badge', { v });
+  b.title = t('update.badgeTitle', { v });
+  b.classList.remove('hidden');
+  b.onclick = () => {
+    b.disabled = true;
+    b.textContent = t('update.installing');
+    window.api.installUpdate();
+  };
+});
+
 // ====================== Overlay de carregamento ======================
 function showLoading(msg) {
   $('loadingMsg').textContent = msg || t('common.loading');

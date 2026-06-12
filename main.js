@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, nativeTheme, shell, protocol, net } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, nativeTheme, shell, protocol, net, safeStorage } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
@@ -19,12 +19,106 @@ if (!app.isPackaged) {
 }
 const CONFIG_PATH = () => path.join(app.getPath('userData'), 'config.json');
 
-function readConfig() {
+// ---------- Segredos: criptografia em repouso (envelope + safeStorage) ----------
+// As chaves de API NÃO vivem mais em plaintext no config.json: ficam em
+// secrets.enc, cifradas com AES-256-GCM por uma master key aleatória de
+// 32 bytes gerada na 1ª execução. A master key é guardada cifrada pelo
+// cofre do sistema operacional (Windows DPAPI / macOS Keychain / Linux
+// Secret Service) via safeStorage — o app a usa, mas quem a guarda é o SO.
+// Preferências (pasta, devices, playlists…) continuam legíveis no config.json.
+// Sem cofre disponível (ex.: Linux sem keyring): fallback plaintext + aviso na UI.
+const SECRET_FIELDS = ['apiKey', 'lastfmApiKey', 'lastfmSecret', 'lastfmSessionKey', 'geniusToken'];
+const MASTER_KEY_PATH = () => path.join(app.getPath('userData'), 'master.key');
+const SECRETS_PATH = () => path.join(app.getPath('userData'), 'secrets.enc');
+const SECRETS_MAGIC = Buffer.from('SYN1'); // cabeçalho + versão do formato
+
+let secureMode = false;  // cofre do SO disponível?
+let masterKey = null;    // Buffer(32) — existe apenas em memória
+let secretsCache = {};   // segredos decriptados, mesclados em readConfig()
+
+function loadOrCreateMasterKey() {
+  const p = MASTER_KEY_PATH();
+  if (fs.existsSync(p)) {
+    try {
+      return Buffer.from(safeStorage.decryptString(fs.readFileSync(p)), 'base64');
+    } catch {
+      // Perfil do SO mudou (reinstalação, usuário novo): a chave antiga é
+      // irrecuperável por design. Recomeça — o usuário recola as chaves de API.
+      console.warn('[secrets] master.key irrecuperável; segredos serão re-solicitados.');
+      try { fs.rmSync(SECRETS_PATH(), { force: true }); } catch { /* ok */ }
+    }
+  }
+  const key = crypto.randomBytes(32);
+  fs.writeFileSync(p, safeStorage.encryptString(key.toString('base64')));
+  return key;
+}
+
+function encryptSecrets(obj) {
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', masterKey, iv);
+  const ct = Buffer.concat([cipher.update(JSON.stringify(obj), 'utf-8'), cipher.final()]);
+  return Buffer.concat([SECRETS_MAGIC, iv, cipher.getAuthTag(), ct]);
+}
+
+function decryptSecrets(buf) {
+  if (!buf || buf.length < 33 || !buf.subarray(0, 4).equals(SECRETS_MAGIC)) return {};
+  const iv = buf.subarray(4, 16);
+  const tag = buf.subarray(16, 32);
+  const ct = buf.subarray(32);
+  const decipher = crypto.createDecipheriv('aes-256-gcm', masterKey, iv);
+  decipher.setAuthTag(tag); // GCM: arquivo adulterado falha aqui, não vira lixo
+  return JSON.parse(Buffer.concat([decipher.update(ct), decipher.final()]).toString('utf-8'));
+}
+
+function persistSecrets() {
+  try { fs.writeFileSync(SECRETS_PATH(), encryptSecrets(secretsCache)); }
+  catch (err) { console.warn('[secrets] falha ao gravar secrets.enc:', err.message); }
+}
+
+// Chamado no app ready: ativa o modo seguro, carrega os segredos e migra
+// chaves plaintext que ainda estejam no config.json (instalações antigas).
+function initSecrets() {
+  try { secureMode = safeStorage.isEncryptionAvailable(); } catch { secureMode = false; }
+  if (!secureMode) {
+    console.warn('[secrets] cofre do SO indisponível — chaves permanecem em plaintext no config.json.');
+    return;
+  }
+  masterKey = loadOrCreateMasterKey();
+  if (fs.existsSync(SECRETS_PATH())) {
+    try {
+      secretsCache = decryptSecrets(fs.readFileSync(SECRETS_PATH()));
+    } catch (err) {
+      console.warn('[secrets] secrets.enc ilegível (perfil novo/arquivo adulterado):', err.message);
+      secretsCache = {};
+    }
+  }
+  // migração: move segredos plaintext do config.json para o cofre
+  const raw = readRawConfig();
+  const found = SECRET_FIELDS.filter((f) => raw[f]);
+  if (found.length) {
+    for (const f of found) { secretsCache[f] = raw[f]; delete raw[f]; }
+    persistSecrets();
+    try { fs.writeFileSync(CONFIG_PATH(), JSON.stringify(raw, null, 2), 'utf-8'); } catch { /* best-effort */ }
+    console.log(`[secrets] ${found.length} segredo(s) migrado(s) para armazenamento cifrado.`);
+  }
+}
+
+// config.json cru, sem os segredos (preferências apenas).
+// Remove o BOM antes do parse: arquivos editados no Notepad vêm com BOM e
+// quebrariam o JSON.parse, fazendo a config inteira cair nos defaults.
+function readRawConfig() {
   try {
-    return JSON.parse(fs.readFileSync(CONFIG_PATH(), 'utf-8'));
+    return JSON.parse(fs.readFileSync(CONFIG_PATH(), 'utf-8').replace(/^\uFEFF/, ''));
   } catch {
     return { apiKey: '', lastfmApiKey: '', geniusToken: '', model: 'gemini-2.5-flash', downloadFolder: '' };
   }
+}
+
+// visão completa: preferências + segredos decriptados
+function readConfig() {
+  const cfg = readRawConfig();
+  if (secureMode) Object.assign(cfg, secretsCache);
+  return cfg;
 }
 
 // Pasta onde a biblioteca de músicas é guardada.
@@ -52,8 +146,22 @@ function getLibraryDir() {
   return fallback;
 }
 
+// grava o config separando segredos (-> secrets.enc) de preferências (-> config.json)
 function writeConfig(cfg) {
-  fs.writeFileSync(CONFIG_PATH(), JSON.stringify(cfg, null, 2), 'utf-8');
+  if (secureMode) {
+    const plain = { ...cfg };
+    let touched = false;
+    for (const f of SECRET_FIELDS) {
+      if (f in plain) {
+        if ((secretsCache[f] || '') !== (plain[f] || '')) { secretsCache[f] = plain[f]; touched = true; }
+        delete plain[f];
+      }
+    }
+    if (touched) persistSecrets();
+    fs.writeFileSync(CONFIG_PATH(), JSON.stringify(plain, null, 2), 'utf-8');
+  } else {
+    fs.writeFileSync(CONFIG_PATH(), JSON.stringify(cfg, null, 2), 'utf-8');
+  }
 }
 
 // ---------- Janela ----------
@@ -142,9 +250,22 @@ function setupAutoUpdate() {
   let autoUpdater;
   try { ({ autoUpdater } = require('electron-updater')); } catch { return; }
   autoUpdater.on('error', (e) => console.warn('[autoUpdate]', e && e.message));
-  autoUpdater.checkForUpdatesAndNotify().catch(() => { /* sem rede: tenta na próxima */ });
+
+  // update baixado: o renderer mostra um badge na titlebar com a nova versão.
+  // Sem clique, instala sozinho no próximo fechamento (autoInstallOnAppQuit).
+  autoUpdater.on('update-downloaded', (info) => {
+    send('update:ready', { version: (info && info.version) || '' });
+  });
+
+  // clique no badge: fecha e instala agora (silencioso), relançando o app
+  ipcMain.on('update:install', () => {
+    closingForReal = true; // pula a interceptação de fade-out do 'close'
+    autoUpdater.quitAndInstall(true, true);
+  });
+
+  autoUpdater.checkForUpdates().catch(() => { /* sem rede: tenta na próxima */ });
   // re-verifica a cada 4 horas em sessões longas
-  setInterval(() => autoUpdater.checkForUpdatesAndNotify().catch(() => {}), 4 * 60 * 60 * 1000);
+  setInterval(() => autoUpdater.checkForUpdates().catch(() => {}), 4 * 60 * 60 * 1000);
 }
 
 app.whenReady().then(() => {
@@ -183,6 +304,7 @@ app.whenReady().then(() => {
       return new Response(null, { status: 404, headers: CORS_HEADERS });
     }
   });
+  initSecrets(); // PRIMEIRO: ativa o cofre e migra chaves plaintext do config.json
   // resolve o idioma da interface: usa o cache do config.json ou casa o
   // locale do sistema com um arquivo em locales/ (fallback: inglês)
   i18n.init({ locale: app.getLocale(), readConfig, writeConfig });
@@ -190,6 +312,16 @@ app.whenReady().then(() => {
   createWindow();
   startDevicePolling(); // monitora armazenamentos removíveis (MP4/pendrive)
   setupAutoUpdate();    // busca atualizações nas releases do GitHub
+  // cofre indisponível + chaves presentes: avisa o usuário (toast na UI)
+  if (!secureMode && SECRET_FIELDS.some((f) => readRawConfig()[f])) {
+    mainWindow.webContents.once('did-finish-load', () => {
+      setTimeout(() => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('security:plaintextWarning');
+        }
+      }, 3000);
+    });
+  }
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
