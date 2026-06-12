@@ -25,7 +25,9 @@ jobs:
         run: npm ci
 
       - name: Build installers
-        run: npm run dist
+        # --publish never: o electron-builder não deve tentar publicar sozinho
+        # (a release é criada no passo seguinte via gh)
+        run: npm run dist -- --publish never
 
       - name: Read version
         id: ver
