@@ -269,12 +269,32 @@ function setupAutoUpdate() {
 }
 
 app.whenReady().then(() => {
-  protocol.handle('mp3file', async (request) => {
-    const filePath = protocolPath(request.url, 'mp3file');
-    const res = await net.fetch(pathToFileURL(filePath).toString());
-    const headers = new Headers(res.headers);
-    headers.set('Access-Control-Allow-Origin', '*');
-    return new Response(res.body, { status: res.status, headers });
+  // Streaming de áudio com suporte a Range (HTTP 206): essencial para o seek —
+  // sem ele o Chromium não consegue reposicionar e a reprodução volta ao início.
+  protocol.handle('mp3file', (request) => {
+    try {
+      const filePath = protocolPath(request.url, 'mp3file');
+      const size = fs.statSync(filePath).size;
+      const headers = {
+        ...CORS_HEADERS,
+        'Content-Type': 'audio/mpeg',
+        'Accept-Ranges': 'bytes'
+      };
+      const m = /bytes=(\d*)-(\d*)/.exec(request.headers.get('Range') || '');
+      if (m && (m[1] || m[2])) {
+        // bytes=início-fim | bytes=início- | bytes=-sufixo
+        const start = m[1] ? parseInt(m[1], 10) : Math.max(0, size - parseInt(m[2], 10));
+        const end = (m[1] && m[2]) ? Math.min(parseInt(m[2], 10), size - 1) : size - 1;
+        if (start >= size || start > end) return new Response(null, { status: 416, headers });
+        headers['Content-Range'] = `bytes ${start}-${end}/${size}`;
+        headers['Content-Length'] = String(end - start + 1);
+        return new Response(Readable.toWeb(fs.createReadStream(filePath, { start, end })), { status: 206, headers });
+      }
+      headers['Content-Length'] = String(size);
+      return new Response(Readable.toWeb(fs.createReadStream(filePath)), { status: 200, headers });
+    } catch {
+      return new Response(null, { status: 404, headers: CORS_HEADERS });
+    }
   });
 
   protocol.handle('mp3cover', (request) => {

@@ -2234,15 +2234,15 @@ function createRow(i) {
   row.dataset.idx = i;
   if (line.time) row.classList.add('le-row--has-time');
 
-  // Número da linha — clicável quando há timestamp: busca o player até a linha
+  // Número da linha — clicável quando há timestamp: busca o player até a linha.
+  // O clique fica SEMPRE ligado (leSeekToLine ignora linha sem tempo): assim,
+  // uma linha estampada agora já é clicável sem esperar o re-render.
   const num = document.createElement('span');
   num.className = 'le-row-num';
   num.textContent = String(i + 1);
-  if (line.time) {
-    num.classList.add('le-row-num--seek');
-    num.title = 'Ouvir a partir desta linha';
-    num.onclick = () => leSeekToLine(i);
-  }
+  num.title = 'Ouvir a partir desta linha';
+  num.onclick = () => leSeekToLine(i);
+  if (line.time) num.classList.add('le-row-num--seek');
 
   // Timestamp
   const timeInp = document.createElement('input');

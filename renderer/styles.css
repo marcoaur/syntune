@@ -2661,9 +2661,12 @@ button, input, select, textarea, .switch,
 }
 .le-row.le-row--bad-time .le-row-num { color: #ff453a; }
 
-/* nº clicável quando a linha tem timestamp: vira botão de "ouvir a partir daqui" */
-.le-row-num--seek { cursor: pointer; }
-.le-row-num--seek:hover {
+/* nº clicável quando a linha tem timestamp: vira botão de "ouvir a partir daqui"
+   (.le-row--has-time cobre linhas estampadas em tempo real, antes do re-render) */
+.le-row-num--seek,
+.le-row--has-time .le-row-num { cursor: pointer; }
+.le-row-num--seek:hover,
+.le-row--has-time .le-row-num:hover {
   color: #34c759;
   text-shadow: 0 0 8px rgba(52, 199, 89, 0.5);
 }
