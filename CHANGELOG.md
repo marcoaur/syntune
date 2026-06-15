@@ -7,6 +7,12 @@ o projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR/).
 
 ## [Não lançado]
 
+### Documentação
+- README (en/pt) reposicionado: herói "organize, enriqueça e possua sua biblioteca"; IA opcional; download de link como feature secundária (não a manchete). Seção de download inclui macOS/Linux.
+
+### Testes
+- Smoke E2E (Playwright/Electron): lança o app e falha se ele não abrir / houver erro de JS no boot. Novo job `e2e` no CI (ubuntu + xvfb).
+
 ## [2.2.0] — 2026-06-15
 
 ### Adicionado

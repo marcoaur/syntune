@@ -5,10 +5,10 @@
 
   ### Sua música. Seus arquivos. Para sempre.
 
-  **O organizador e player de música offline com alma de streaming premium — turbinado por IA e movido por dados abertos.**
+  **Organize, enriqueça e POSSUA sua biblioteca de música — offline e privado. Acabamento de streaming, sem o aluguel.**
 
-  ![Electron](https://img.shields.io/badge/Electron-31-47848F?logo=electron&logoColor=white)
-  ![Plataforma](https://img.shields.io/badge/Windows-10%2F11-0078D4?logo=windows&logoColor=white)
+  ![Electron](https://img.shields.io/badge/Electron-41-47848F?logo=electron&logoColor=white)
+  ![Plataforma](https://img.shields.io/badge/plataforma-Windows%20%7C%20macOS%20%7C%20Linux-0078D4)
   ![Licença](https://img.shields.io/badge/licen%C3%A7a-GPL--3.0-blue)
   ![IA](https://img.shields.io/badge/Gemini-flash--lite-FFAA00)
   ![Dados abertos](https://img.shields.io/badge/dados-MusicBrainz%20%7C%20LRCLIB%20%7C%20Last.fm-brightgreen)
@@ -52,7 +52,7 @@ Streaming é aluguel. Um dia o catálogo muda, a música some da playlist, o app
 
 Arquivos locais são **seus**. Tocam no MP4 do seu bolso, no pendrive do carro, no PC sem internet, daqui a vinte anos. O problema nunca foi ter os arquivos — foi cuidar deles: nomes bagunçados, "Artista Desconhecido", capas faltando, tags pela metade.
 
-**Syntune** resolve isso de ponta a ponta: baixa, identifica, etiqueta, embeleza, toca e sincroniza. Com a precisão de bancos de dados musicais abertos, a inteligência do Gemini para preencher as lacunas, e uma interface que faz seus MP3 parecerem um serviço de streaming de primeira linha — sem nunca deixarem de ser seus.
+**Syntune** cuida dessa biblioteca: organiza, identifica, etiqueta, embeleza, toca e sincroniza a sua música — e quando você precisa de uma faixa à qual tem direito, baixa de um link também. Com a precisão de bancos de dados musicais abertos (e IA opcional para preencher as lacunas), faz seus MP3 parecerem um serviço de streaming de primeira linha — sem nunca deixarem de ser seus.
 
 ---
 
@@ -60,12 +60,12 @@ Arquivos locais são **seus**. Tocam no MP4 do seu bolso, no pendrive do carro, 
 
 | | Recurso | Por que importa |
 |:--|:--|:--|
-| 📥 | **Importação de plataformas de conteúdo** | Cole o link de um conteúdo ao qual você tem direito → MP3 com tags completas e capa em alta. Sem etapas manuais. |
 | 🧠 | **Enriquecimento por IA ancorado em fatos** | MusicBrainz + iTunes trazem os fatos; o Gemini só preenche o que falta — nunca contradiz dados confiáveis. Adeus alucinação. |
 | 🔑 | **Funciona sem chave de API** | Sem chave do Gemini (ou IA desligada)? **Modo factual** etiqueta direto de MusicBrainz / iTunes / LRCLIB + capa em alta. A IA é um reforço opcional — liga/desliga em Configurações. |
 | 🖼️ | **Capas em alta resolução** | Cover Art Archive e iTunes (600×600+), com recorte embutido no editor. |
 | 🎤 | **Letras sincronizadas (karaokê)** | Busca automática no LRCLIB + editor próprio para sincronizar verso a verso. |
 | 📡 | **Publicação de letras no LRCLIB** | Sincronizou uma letra? Publique direto do app e ela vira patrimônio público. |
+| 📥 | **Baixe faixas de um link** | Precisa de uma faixa à qual tem direito? Cole o link → MP3 com tags completas e capa em alta. Sem etapas manuais. |
 | 🎨 | **Interface viva** | A cor dominante de cada capa tinge cards, player e ambiente. Visualizador de espectro em tempo real. |
 | 🔊 | **Player completo** | Fila, shuffle, repeat, playlists, modo tela cheia "Tocando agora". |
 | 🎛️ | **Equalizador de 6 bandas** | Graves, médios e agudos em tempo real via Web Audio — ajuste o som ao seu gosto. |
@@ -197,10 +197,14 @@ Este app organiza sua coleção — mas é você quem decide o que entra nela. I
 
 ## 🚀 Começando
 
-### 📦 1. Baixe (Windows x64)
+### 📦 1. Baixe
 
+**Windows x64**
 - **[⬇️ Instalador — Syntune-Setup.exe](https://github.com/marcoaur/syntune/releases/latest/download/Syntune-Setup.exe)** *(recomendado)*
 - **[⬇️ Portátil — Syntune-Portable.exe](https://github.com/marcoaur/syntune/releases/latest/download/Syntune-Portable.exe)** — sem instalação, rode de onde quiser
+
+**macOS** (Apple Silicon) e **Linux** — pegue o `.dmg` / `.AppImage` / `.deb` na **[última release](https://github.com/marcoaur/syntune/releases/latest)**.
+> Os builds de macOS e Linux ainda não são assinados — o macOS pode avisar ("desenvolvedor não identificado"); clique com o botão direito → Abrir. AppImage: `chmod +x` e rode.
 
 Sem pré-requisitos: `yt-dlp` e `ffmpeg` são baixados automaticamente na primeira vez que o app precisar deles.
 
