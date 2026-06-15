@@ -2959,6 +2959,12 @@ function applyPlayerIcons() {
 }
 
 const audio = new Audio();
+// O áudio vem do protocolo custom mp3file:// (outra origem). Para roteá-lo pelo
+// grafo Web Audio (createMediaElementSource) sem o Chromium silenciar a fonte por
+// "cross-origin taint", o elemento precisa ser CORS-clean. O handler já envia
+// Access-Control-Allow-Origin: *, então 'anonymous' basta. (Regressão exposta no
+// Electron 41 / Chromium novo, que passou a impor isso de forma estrita.)
+audio.crossOrigin = 'anonymous';
 
 // ---- Visualizador de espectro (Web Audio API) ----
 // Liga o <audio> a um AnalyserNode e desenha as frequências num canvas atrás
