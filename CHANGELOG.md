@@ -7,6 +7,8 @@ o projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR/).
 
 ## [Não lançado]
 
+## [2.3.0] — 2026-06-15
+
 ### Corrigido
 - **Modal de Configurações cortado:** o conteúdo extrapolava a janela. Agora as configurações são **seções colapsíveis (accordion)** — só 1 aberta por vez (Idioma, IA, Genius, Last.fm, Biblioteca) — e a sheet tem altura máxima com rolagem de segurança.
 - **i18n da feature de letra:** badges de sincronização, card de status, modal de opções (textos contextuais), o editor (menu/hints/cabeçalhos/botões), **e os toasts/confirmações + erros de publicação (renderer e main)** estavam hardcoded em PT — agora tudo passa pelo i18n. Varredura confirma 0 strings de UI hardcoded restantes (67 chaves novas, en/pt).
@@ -77,7 +79,8 @@ o projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR/).
 
 Versões anteriores (≤ 2.0.6): ver as [Releases no GitHub](https://github.com/marcoaur/syntune/releases).
 
-[Não lançado]: https://github.com/marcoaur/syntune/compare/v2.2.0...HEAD
+[Não lançado]: https://github.com/marcoaur/syntune/compare/v2.3.0...HEAD
+[2.3.0]: https://github.com/marcoaur/syntune/releases/tag/v2.3.0
 [2.2.0]: https://github.com/marcoaur/syntune/releases/tag/v2.2.0
 [2.1.2]: https://github.com/marcoaur/syntune/releases/tag/v2.1.2
 [2.1.1]: https://github.com/marcoaur/syntune/releases/tag/v2.1.1
