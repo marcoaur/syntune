@@ -875,6 +875,22 @@ select.input { cursor: pointer; }
 .sheet-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
 .app-version { font-size: 10px; color: var(--text-dim); opacity: 0.55; text-align: right; margin-top: 8px; letter-spacing: 0.02em; }
 
+/* Configurações em accordion (1 seção aberta por vez) + altura limitada à janela */
+#settingsModal .sheet { max-height: calc(100vh - var(--tb-height) - 28px); }
+.acc { display: flex; flex-direction: column; gap: 8px; overflow-y: auto; flex: 1; min-height: 0; }
+.acc-item { border: 1px solid rgba(128, 128, 128, 0.18); border-radius: 10px; }
+.acc-item.open { border-color: rgba(124, 92, 255, 0.4); }
+.acc-head {
+  width: 100%; display: flex; align-items: center; justify-content: space-between;
+  padding: 11px 13px; background: transparent; border: none; color: inherit;
+  font: inherit; font-weight: 600; cursor: pointer; text-align: left; border-radius: 10px;
+}
+.acc-head:hover { background: rgba(128, 128, 128, 0.06); }
+.acc-chevron { transition: transform 0.2s; opacity: 0.55; flex-shrink: 0; }
+.acc-item.open .acc-chevron { transform: rotate(90deg); }
+.acc-body { display: none; flex-direction: column; gap: 12px; padding: 2px 13px 13px; }
+.acc-item.open .acc-body { display: flex; }
+
 /* ---------- Overlay de carregamento ---------- */
 .loading-overlay {
   position: fixed; inset: 0;

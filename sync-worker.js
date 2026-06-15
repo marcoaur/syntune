@@ -1,3 +1,11 @@
+/**
+ * @module  sync-worker
+ * @badge   🟨 DEVICE · WORKER-THREAD · IPC(parentPort)
+ * @role    Host worker_threads: recebe { id, type, params }, executa scan/sync (I/O pesado) via sync-engine fora da thread principal e devolve progresso/resultado.
+ * @inputs  mensagens do processo principal (parentPort)
+ * @outputs mensagens de progresso e resultado
+ * @deps    worker_threads, ./sync-engine
+ */
 // ====================================================================
 // Worker thread de sincronização. Recebe tarefas { id, type, params }
 // do processo principal, executa scan/sync (operações de I/O pesadas)

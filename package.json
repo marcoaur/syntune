@@ -1,6 +1,6 @@
 {
   "name": "syntune",
-  "version": "2.0.8",
+  "version": "2.3.0",
   "description": "Organizador e player de música offline: enriquece MP3 com IA + dados musicais abertos e sincroniza a biblioteca com dispositivos portáteis",
   "main": "main.js",
   "author": "Marco",
@@ -8,7 +8,9 @@
   "scripts": {
     "start": "electron .",
     "dist": "electron-builder",
-    "build": "node scripts/build.js"
+    "build": "node scripts/build.js",
+    "test": "node --test",
+    "test:e2e": "node --test e2e/smoke.mjs"
   },
   "build": {
     "appId": "com.marco.syntune",
@@ -46,6 +48,21 @@
     "portable": {
       "artifactName": "Syntune-Portable.exe"
     },
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "category": "public.app-category.music"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Audio",
+      "maintainer": "Marco <marcoxpg2@gmail.com>"
+    },
     "publish": [
       {
         "provider": "github",
@@ -60,7 +77,8 @@
     "yt-dlp-wrap": "^2.3.12"
   },
   "devDependencies": {
-    "electron": "^31.7.7",
-    "electron-builder": "^24.13.3"
+    "electron": "^41.7.1",
+    "electron-builder": "^26.15.3",
+    "playwright-core": "^1.61.0"
   }
 }

@@ -1,3 +1,11 @@
+// ===================== Módulos puros (ESM) =====================
+// Helpers sem estado, extraídos do monolito. Ver renderer/modules/*.js e AGENTS.md.
+import { normPart, keyOf, normalizeText, artistInitials, escapeHtmlText, cssEsc, fmtBytes, fmtDb } from './modules/format.js';
+import { rgbToHsl, hslToRgb, deriveBarColors, lerpPal } from './modules/color.js';
+import { isSyncedLyrics, parseLrc, lrcToPlain, parseLrcTime, fmtTimestamp, parseLrcSeconds, parseLyricsToLines, serializeLines } from './modules/lrc.js';
+import { LYRICS_STATUS, EQ_BANDS, EQ_BUILTINS } from './modules/constants.js';
+import { ICONS } from './modules/icons.js';
+
 // O main resolve o idioma (locale do sistema + cache em config.json) e entrega
 // o dicionário pronto. t() traduz chaves; tn() escolhe singular/plural;
 // applyStaticI18n() aplica as traduções nos elementos estáticos do HTML
@@ -82,10 +90,6 @@ const fields = ['title', 'artist', 'album', 'albumArtist', 'composer', 'year',
   'genre', 'trackNumber', 'partOfSet', 'publisher', 'comment', 'lyrics'];
 
 // chave de identidade da faixa (espelha syncKey do main): nome|artista|ano
-function normPart(s) { return (s == null ? '' : String(s)).toLowerCase().trim().replace(/\s+/g, ' '); }
-function keyOf(s) {
-  return `${normPart(s.title)}|${normPart(s.artist)}|${(s.year == null ? '' : String(s.year)).trim()}`;
-}
 
 // ====================== Controles da janela ======================
 $('btnClose').addEventListener('click', () => window.api.close());
@@ -311,9 +315,6 @@ function songSubtitle(s) {
 }
 
 // normaliza p/ busca: minúsculas e sem acentos (bom p/ português)
-function normalizeText(s) {
-  return (s == null ? '' : String(s)).toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu, '');
-}
 // casa todos os termos (AND) em título + artista + álbum
 function matchesQuery(s, terms) {
   if (!terms.length) return true;
@@ -366,12 +367,6 @@ function renderList() {
 }
 
 // iniciais do artista para o avatar (placeholder)
-function artistInitials(name) {
-  const parts = (name || '').trim().split(/\s+/).filter(Boolean);
-  if (!parts.length) return '♪';
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
-}
 
 const globalPlaycountCache = {};   // artist + "-" + title -> { playcount, listeners, tags } | null
 const globalPlaycountPending = {}; // artist + "-" + title -> Promise
@@ -883,7 +878,6 @@ function openAddToPlaylistMenu(s, anchorEl) {
   songMenuDocHandler = (e) => { const m = document.getElementById('songContext'); if (m && !m.contains(e.target)) closeSongMenu(); };
   setTimeout(() => { document.addEventListener('click', songMenuDocHandler); window.addEventListener('resize', closeSongMenu); }, 0);
 }
-function escapeHtmlText(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
 
 function buildSongCard(s, queueList) {
   const card = document.createElement('div');
@@ -1440,7 +1434,7 @@ function renderEditorView() {
       const statusKey = computeLyricsStatus(syncTag, lyricsVisible);
       const st = LYRICS_STATUS[statusKey] || LYRICS_STATUS.empty;
       badge.className = 'ev-lyrics-badge ' + st.badgeCls;
-      badge.textContent = st.badgeLabel;
+      badge.textContent = t(st.badgeKey);
       // Mostra o badge apenas quando há letra e o estado é relevante
       badge.classList.toggle('hidden', !lyricsVisible || statusKey === 'empty');
     }).catch(() => {});
@@ -1580,43 +1574,6 @@ $('fetchBtn').addEventListener('click', async () => {
 // ==================== EDITOR IMERSIVO DE LETRAS ====================
 
 // ---- Status map: 5 estados claros ----
-const LYRICS_STATUS = {
-  // Sem letra, nunca buscou no LRCLIB
-  empty: {
-    title: 'Sem letra',
-    sub: 'Toque para buscar ou criar',
-    dotCls: 'lm-status-dot--pending',
-    badgeCls: 'ev-lyrics-badge--pending', badgeLabel: '— Sem letra'
-  },
-  // Buscou no LRCLIB, não encontrou nada
-  not_found: {
-    title: 'Não encontrada',
-    sub: 'LRCLIB não tem — você pode criar',
-    dotCls: 'lm-status-dot--not_found',
-    badgeCls: 'ev-lyrics-badge--not_found', badgeLabel: '⚠ Não no LRCLIB'
-  },
-  // Tem letra mas origem desconhecida (arquivo antigo sem tag)
-  pending: {
-    title: 'Origem desconhecida',
-    sub: 'Letra presente, nunca sincronizada',
-    dotCls: 'lm-status-dot--local',
-    badgeCls: 'ev-lyrics-badge--local', badgeLabel: '⏳ Não verificada'
-  },
-  // Letra criada/editada localmente, não publicada no LRCLIB
-  local: {
-    title: 'Editando',
-    sub: 'Salva localmente · não contribuída',
-    dotCls: 'lm-status-dot--local',
-    badgeCls: 'ev-lyrics-badge--local', badgeLabel: '✍ Local'
-  },
-  // Letra veio do LRCLIB ou foi publicada lá com sucesso
-  synced: {
-    title: 'Sincronizado',
-    sub: 'Via LRCLIB.net · em sincronia',
-    dotCls: 'lm-status-dot--synced',
-    badgeCls: 'ev-lyrics-badge--synced', badgeLabel: '✓ Sincronizado'
-  }
-};
 
 // ---- Calcula o status composto (tag ID3 + presença de letra) ----
 // Tabela de decisão:
@@ -1654,7 +1611,7 @@ async function updateLyricsStatusCard() {
 
   // lscTitle = nome do status
   const titleEl = $('lscTitle');
-  if (titleEl) titleEl.textContent = st.title;
+  if (titleEl) titleEl.textContent = t(st.titleKey);
 
   // lscSub: se tem letra, mostra preview da primeira linha; senão, instrução do status
   const subEl = $('lscSub');
@@ -1663,9 +1620,9 @@ async function updateLyricsStatusCard() {
       const firstLine = lyricsVal.replace(/^\[.*?\]/gm, '').split('\n').find((l) => l.trim());
       subEl.textContent = firstLine
         ? (firstLine.length > 52 ? firstLine.slice(0, 49) + '…' : firstLine)
-        : st.sub;
+        : t(st.subKey);
     } else {
-      subEl.textContent = st.sub;
+      subEl.textContent = t(st.subKey);
     }
   }
 
@@ -1688,13 +1645,13 @@ function openLyricsModal() {
 
   // Título do modal = nome da música (ou fallback)
   const songTitle = $('title') && $('title').value.trim();
-  $('lmTitle').textContent = songTitle || 'Letra da Música';
+  $('lmTitle').textContent = songTitle || t('lyrics.modal.title');
 
   // Status dot + texto descritivo
   const dot = $('lmStatusDot');
   if (dot) dot.className = 'lm-status-dot ' + st.dotCls;
   const stTxt = $('lmStatusText');
-  if (stTxt) stTxt.textContent = st.sub;
+  if (stTxt) stTxt.textContent = t(st.subKey);
 
   // ---- Visibilidade e texto contextual de cada ação ----
 
@@ -1704,17 +1661,17 @@ function openLyricsModal() {
   const searchSub = searchBtn && searchBtn.querySelector('.lm-action-sub');
   if (searchLabel) {
     if (statusKey === 'synced') {
-      searchLabel.textContent = 'Buscar novamente';
-      if (searchSub) searchSub.textContent = 'Substituir pela versão mais recente do LRCLIB';
+      searchLabel.textContent = t('lyrics.modal.searchAgain');
+      if (searchSub) searchSub.textContent = t('lyrics.modal.searchSubSynced');
     } else if (statusKey === 'not_found') {
-      searchLabel.textContent = 'Buscar novamente';
-      if (searchSub) searchSub.textContent = 'Talvez já tenha sido adicionada à comunidade';
+      searchLabel.textContent = t('lyrics.modal.searchAgain');
+      if (searchSub) searchSub.textContent = t('lyrics.modal.searchSubNotFound');
     } else if (hasLyrics) {
-      searchLabel.textContent = 'Buscar na comunidade';
-      if (searchSub) searchSub.textContent = 'Substituir letra pelo resultado do LRCLIB';
+      searchLabel.textContent = t('lyrics.modal.search');
+      if (searchSub) searchSub.textContent = t('lyrics.modal.searchSubReplace');
     } else {
-      searchLabel.textContent = 'Buscar na comunidade';
-      if (searchSub) searchSub.textContent = 'Procurar no LRCLIB.net';
+      searchLabel.textContent = t('lyrics.modal.search');
+      if (searchSub) searchSub.textContent = t('lyrics.modal.searchSub');
     }
   }
 
@@ -1724,14 +1681,14 @@ function openLyricsModal() {
   const editSub = editBtn && editBtn.querySelector('.lm-action-sub');
   if (editLabel) {
     if (!hasLyrics) {
-      editLabel.textContent = 'Criar letra';
-      if (editSub) editSub.textContent = 'Escrever uma nova letra para este arquivo';
+      editLabel.textContent = t('lyrics.modal.create');
+      if (editSub) editSub.textContent = t('lyrics.modal.createSub');
     } else if (statusKey === 'synced') {
-      editLabel.textContent = 'Editar letra';
-      if (editSub) editSub.textContent = 'Atenção: editar irá quebrar a sincronia com o LRCLIB';
+      editLabel.textContent = t('lyrics.modal.edit');
+      if (editSub) editSub.textContent = t('lyrics.modal.editSubSynced');
     } else {
-      editLabel.textContent = 'Editar letra';
-      if (editSub) editSub.textContent = 'Abrir o editor de sincronização karaokê';
+      editLabel.textContent = t('lyrics.modal.edit');
+      if (editSub) editSub.textContent = t('lyrics.modal.editSub');
     }
   }
 
@@ -1742,12 +1699,12 @@ function openLyricsModal() {
     publishBtn.classList.toggle('hidden', !canPublish);
     const publishLabel = publishBtn.querySelector('strong');
     const publishSub = publishBtn.querySelector('.lm-action-sub');
-    if (publishLabel) publishLabel.textContent = 'Publicar no LRCLIB';
+    if (publishLabel) publishLabel.textContent = t('lyrics.modal.publish');
     if (publishSub) {
       if (statusKey === 'pending') {
-        publishSub.textContent = 'Contribuir com esta letra à comunidade';
+        publishSub.textContent = t('lyrics.modal.publishSubPending');
       } else {
-        publishSub.textContent = 'Contribuir com a comunidade de letras';
+        publishSub.textContent = t('lyrics.modal.publishSub');
       }
     }
   }
@@ -1800,7 +1757,7 @@ $('lmSearchBtn').addEventListener('click', async () => {
     // ✅ Encontrado no LRCLIB → sincronia imediata
     if (currentFilePath) await window.api.lyricsSetSyncStatus(currentFilePath, 'synced');
     await updateLyricsStatusCard();
-    toast('Letra sincronizada com o LRCLIB! ✓', 'success');
+    toast(t('lyrics.toast.synced'), 'success');
     closeLyricsModal();
     // Salva no MP3 com tag synced
     saveDetailsWithSync('synced');
@@ -1808,7 +1765,7 @@ $('lmSearchBtn').addEventListener('click', async () => {
     // Não encontrado → marca e mantém modal aberto com estado atualizado
     if (currentFilePath) await window.api.lyricsSetSyncStatus(currentFilePath, 'not_found');
     await updateLyricsStatusCard();
-    toast('Não encontrada no LRCLIB. Você pode criar a letra! ✍️', '');
+    toast(t('lyrics.toast.notFoundCreate'), '');
     // Reabre o modal com o estado atualizado (not_found)
     openLyricsModal();
   }
@@ -1831,7 +1788,7 @@ $('lmPublishBtn').addEventListener('click', async () => {
 
   if (!dur) {
     btn.classList.remove('lm-loading');
-    toast('Toque a música primeiro para obter a duração antes de publicar.', 'error');
+    toast(t('lyrics.toast.playFirst'), 'error');
     return;
   }
 
@@ -1848,10 +1805,10 @@ $('lmPublishBtn').addEventListener('click', async () => {
   btn.classList.remove('lm-loading');
 
   if (pubRes.error) {
-    toast('Erro ao publicar: ' + pubRes.error, 'error');
+    toast(t('lyrics.toast.publishError', { msg: pubRes.error }), 'error');
   } else {
     await updateLyricsStatusCard();
-    toast('Letra publicada na comunidade LRCLIB! Obrigado por contribuir. 🎶', 'success');
+    toast(t('lyrics.toast.published'), 'success');
     closeLyricsModal();
     // Salva automaticamente a tag 'synced' no MP3
     saveDetailsWithSync('synced');
@@ -1860,11 +1817,11 @@ $('lmPublishBtn').addEventListener('click', async () => {
 
 // -- Remover letra --
 $('lmClearBtn').addEventListener('click', async () => {
-  if (!confirm('Remover a letra deste arquivo MP3?')) return;
+  if (!confirm(t('lyrics.confirm.remove'))) return;
   $('lyrics').value = '';
   if (currentFilePath) await window.api.lyricsSetSyncStatus(currentFilePath, 'not_found');
   await updateLyricsStatusCard();
-  toast('Letra removida.', '');
+  toast(t('lyrics.toast.removed'), '');
   closeLyricsModal();
   saveDetailsWithSync('not_found');
 });
@@ -1931,7 +1888,7 @@ function cycleSpeed() {
 
 // Desloca TODOS os timestamps por delta segundos (offset global)
 function leOffsetAll(deltaSec) {
-  if (!leLines.some(l => l.time)) { toast('Nenhum timestamp para deslocar.', ''); return; }
+  if (!leLines.some(l => l.time)) { toast(t('lyrics.toast.noTimestamps'), ''); return; }
   leRecord();
   leLines.forEach(l => {
     const s = parseLrcSeconds(l.time);
@@ -1956,8 +1913,8 @@ function leValidateOrder() {
     const s = parseLrcSeconds(leLines[idx] && leLines[idx].time);
     const bad = s >= 0 && prev >= 0 && s < prev;
     r.classList.toggle('le-row--bad-time', bad);
-    if (bad) r.title = 'Timestamp fora de ordem (menor que o anterior)';
-    else if (r.title === 'Timestamp fora de ordem (menor que o anterior)') r.title = '';
+    if (bad) r.title = t('lyrics.editor.outOfOrder');
+    else if (r.title === t('lyrics.editor.outOfOrder')) r.title = '';
     if (s >= 0) prev = s;
   });
 }
@@ -1970,38 +1927,9 @@ function leSeekToLine(i) {
   if (audio.paused) audio.play().catch(() => {});
 }
 
-function parseLrcTime(raw) {
-  const m = raw.match(/(\d{1,2}):(\d{2}(?:\.\d+)?)/);
-  if (!m) return '';
-  return m[1].padStart(2, '0') + ':' + parseFloat(m[2]).toFixed(2).padStart(5, '0');
-}
 
-function fmtTimestamp(seconds) {
-  if (!seconds && seconds !== 0) return '';
-  const s = Math.max(0, seconds);
-  const mm = String(Math.floor(s / 60)).padStart(2, '0');
-  const ss = (s % 60).toFixed(2).padStart(5, '0');
-  return mm + ':' + ss;
-}
 
-function parseLyricsToLines(raw) {
-  if (!raw) return [{ time: '', text: '' }];
-  const out = [];
-  raw.split('\n').forEach(l => {
-    const m = l.match(/^\[(\d{1,2}:\d{2}(?:\.\d+)?)\]\s?(.*)$/);
-    if (m) out.push({ time: parseLrcTime(m[1]), text: m[2] });
-    else if (l.trim()) out.push({ time: '', text: l.trim() });
-  });
-  return out.length ? out : [{ time: '', text: '' }];
-}
 
-function serializeLines(lines) {
-  // Só serializa linhas com texto real — descarta linhas vazias e timestamps órfãos
-  return lines.filter(l => l.text && l.text.trim()).map(l => {
-    const t = l.time ? `[${l.time}]` : '';
-    return t + l.text.replace(/[\r\n]+/g, ' '); // garante 1 linha LRC por verso
-  }).join('\n');
-}
 
 // --- Abrir o editor ---
 function openLyricsEditor() {
@@ -2072,13 +2000,6 @@ function closeLyricsEditor() {
 // --- Loop de destaque em tempo real (rAF) ---
 let leLastActiveIdx = -1;
 
-function parseLrcSeconds(timeStr) {
-  // '01:23.45' -> 83.45
-  if (!timeStr) return -1;
-  const m = timeStr.match(/(\d{1,2}):(\d{2}(?:\.\d+)?)/);
-  if (!m) return -1;
-  return parseInt(m[1], 10) * 60 + parseFloat(m[2]);
-}
 
 function startLeActiveLoop() {
   if (leRafId) cancelAnimationFrame(leRafId);
@@ -2240,7 +2161,7 @@ function createRow(i) {
   const num = document.createElement('span');
   num.className = 'le-row-num';
   num.textContent = String(i + 1);
-  num.title = 'Ouvir a partir desta linha';
+  num.title = t('lyrics.editor.playFromLine');
   num.onclick = () => leSeekToLine(i);
   if (line.time) num.classList.add('le-row-num--seek');
 
@@ -2394,7 +2315,7 @@ function createRow(i) {
   // Alça de arrasto — reordenar linhas
   const grip = document.createElement('span');
   grip.className = 'le-grip';
-  grip.title = 'Arrastar para reordenar';
+  grip.title = t('lyrics.editor.dragReorder');
   grip.draggable = true;
   grip.innerHTML = '<svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor"><circle cx="9" cy="6" r="1.6"/><circle cx="15" cy="6" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="18" r="1.6"/><circle cx="15" cy="18" r="1.6"/></svg>';
   grip.addEventListener('dragstart', (e) => {
@@ -2483,7 +2404,7 @@ function focusLineText(idx) {
 
 // Fecha o editor pedindo confirmação se houver alterações não salvas
 function leTryClose() {
-  if (leDirty && !confirm('Descartar as alterações não salvas da letra?')) return;
+  if (leDirty && !confirm(t('lyrics.confirm.discard'))) return;
   closeLyricsEditor();
 }
 
@@ -2525,7 +2446,7 @@ document.addEventListener('click', () => { if (leMenuIsOpen()) leMenuClose(); })
 $('leOffMinus').addEventListener('click', () => leOffsetAll(-0.1));
 $('leOffPlus').addEventListener('click', () => leOffsetAll(0.1));
 $('leClearTimes').addEventListener('click', () => {
-  if (leLines.some(l => l.time) && confirm('Remover todos os timestamps? O texto é mantido (desfazível com Ctrl+Z).')) {
+  if (leLines.some(l => l.time) && confirm(t('lyrics.confirm.clearTimes'))) {
     leClearAllTimes();
   }
   leMenuClose();
@@ -2570,7 +2491,7 @@ $('leSaveBtn').addEventListener('click', async () => {
   const btn = $('leSaveBtn');
   const originalHtml = btn.innerHTML;
   btn.disabled = true;
-  btn.innerHTML = '<span style="display:inline-flex;align-items:center;gap:6px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="le-spin"><circle cx="12" cy="12" r="10" stroke-dasharray="40" stroke-dashoffset="10"/></svg>Salvando…</span>';
+  btn.innerHTML = '<span style="display:inline-flex;align-items:center;gap:6px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="le-spin"><circle cx="12" cy="12" r="10" stroke-dasharray="40" stroke-dashoffset="10"/></svg>' + t('lyrics.editor.saving') + '</span>';
 
   const syncedLyrics = serializeLines(leLines);
   $('lyrics').value = syncedLyrics;
@@ -2935,9 +2856,32 @@ $('cropModal').addEventListener('click', (e) => { if (e.target === $('cropModal'
 
 // ====================== Configurações ======================
 const modal = $('settingsModal');
+// Nomes de exibição dos idiomas (fallback: código em maiúsculas)
+const LANG_NAMES = { en: 'English', pt: 'Português', 'pt-br': 'Português (Brasil)', 'pt-pt': 'Português (Portugal)', es: 'Español', fr: 'Français', de: 'Deutsch', it: 'Italiano', ru: 'Русский', ja: '日本語', zh: '中文' };
+let langConfigured = 'auto'; // idioma salvo ('auto' = detectar pelo locale do SO)
+async function populateLanguageSelect() {
+  let info = {};
+  try { info = await window.api.getI18n(); } catch { /* usa padrões */ }
+  const available = Array.isArray(info.available) ? info.available : [];
+  langConfigured = info.configured ? String(info.configured).toLowerCase() : 'auto';
+  const sel = $('language');
+  sel.innerHTML = '';
+  const auto = document.createElement('option');
+  auto.value = 'auto'; auto.textContent = t('settings.languageAuto');
+  sel.appendChild(auto);
+  for (const code of available) {
+    const o = document.createElement('option');
+    o.value = code; o.textContent = LANG_NAMES[code] || code.toUpperCase();
+    sel.appendChild(o);
+  }
+  sel.value = available.includes(langConfigured) ? langConfigured : 'auto';
+}
+
 $('settingsBtn').addEventListener('click', async () => {
   const cfg = await window.api.getConfig();
+  await populateLanguageSelect();
   $('apiKey').value = cfg.apiKey || '';
+  $('useAi').checked = cfg.useAi !== false; // padrão: ligado (compat. instalações antigas)
   $('geniusToken').value = cfg.geniusToken || '';
   $('lastfmApiKey').value = cfg.lastfmApiKey || '';
   $('lastfmSecret').value = cfg.lastfmSecret || '';
@@ -2956,6 +2900,17 @@ $('browseFolder').addEventListener('click', async () => {
 $('clearFolder').addEventListener('click', () => { $('downloadFolder').value = ''; });
 $('cancelSettings').addEventListener('click', () => closeViewAnimated(modal));
 modal.addEventListener('click', (e) => { if (e.target === modal) closeViewAnimated(modal); });
+
+// Accordion das Configurações: 1 seção aberta por vez. Clicar numa seção fecha as
+// demais; clicar na já aberta a recolhe.
+$('settingsAcc').addEventListener('click', (e) => {
+  const head = e.target.closest('.acc-head');
+  if (!head) return;
+  const item = head.parentElement;
+  const wasOpen = item.classList.contains('open');
+  $('settingsAcc').querySelectorAll('.acc-item.open').forEach((el) => el.classList.remove('open'));
+  if (!wasOpen) item.classList.add('open');
+});
 
 $('lastfmScrobbleEnabled').addEventListener('change', (e) => {
   $('lastfmScrobbleFields').classList.toggle('hidden', !e.target.checked);
@@ -2984,6 +2939,7 @@ $('saveSettings').addEventListener('click', async () => {
   const lastfmApiKey = $('lastfmApiKey').value.trim();
   await window.api.setConfig({
     apiKey: $('apiKey').value.trim(),
+    useAi: $('useAi').checked,
     geniusToken,
     lastfmApiKey,
     lastfmSecret: $('lastfmSecret').value.trim(),
@@ -2992,6 +2948,12 @@ $('saveSettings').addEventListener('click', async () => {
     model: $('model').value,
     downloadFolder: $('downloadFolder').value.trim()
   });
+  // troca de idioma: aplica reiniciando o app (o relaunch encerra a execução aqui)
+  const langSel = $('language').value;
+  if (langSel !== langConfigured) {
+    await window.api.setLanguage(langSel === 'auto' ? '' : langSel);
+    return;
+  }
   closeViewAnimated(modal);
   toast(t('settings.saved'), 'success');
   // se o token do Genius mudou, limpa o cache em memória p/ buscar fotos novamente
@@ -3007,31 +2969,6 @@ $('saveSettings').addEventListener('click', async () => {
 
 // ====================== Player ======================
 // Ícones SVG inline (estilo traço fino, herdam a cor via currentColor).
-const _svgStroke = (paths) => `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${paths}</svg>`;
-const _svgFill = (paths) => `<svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor">${paths}</svg>`;
-const ICONS = {
-  play: _svgFill('<path d="M8 5v14l11-7z"/>'),
-  pause: _svgFill('<path d="M7 5h3v14H7z"/><path d="M14 5h3v14h-3z"/>'),
-  prev: _svgFill('<path d="M7 5h2.4v14H7z"/><path d="M20 5v14L9 12z"/>'),
-  next: _svgFill('<path d="M14.6 5H17v14h-2.4z"/><path d="M4 5v14l11-7z"/>'),
-  shuffle: _svgStroke('<path d="M2 18h1.4c1.3 0 2.5-.6 3.3-1.7l6.1-8.6c.7-1.1 2-1.7 3.3-1.7H22"/><path d="m18 2 4 4-4 4"/><path d="M2 6h1.9c1.5 0 2.9.9 3.6 2.2"/><path d="M22 18h-5.9c-1.3 0-2.6-.7-3.3-1.8l-.5-.8"/><path d="m18 14 4 4-4 4"/>'),
-  repeat: _svgStroke('<path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/>'),
-  repeatOne: _svgStroke('<path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/><path d="M11 10h1v4"/>'),
-  queue: _svgStroke('<path d="M21 15V6"/><circle cx="18.5" cy="15.5" r="2.5"/><path d="M12 12H3"/><path d="M16 6H3"/><path d="M12 18H3"/>'),
-  volume: _svgStroke('<path d="M11 5 6 9H2v6h4l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M19 5a10 10 0 0 1 0 14"/>'),
-  close: _svgStroke('<path d="M18 6 6 18"/><path d="m6 6 12 12"/>'),
-  chevron: _svgStroke('<path d="m9 6 6 6-6 6"/>'),
-  chevronDown: _svgStroke('<path d="m6 9 6 6 6-6"/>'),
-  expandUp: _svgStroke('<path d="m6 15 6-6 6 6"/>'),
-  eq: _svgStroke('<line x1="4" x2="4" y1="21" y2="14"/><line x1="4" x2="4" y1="10" y2="3"/><line x1="12" x2="12" y1="21" y2="12"/><line x1="12" x2="12" y1="8" y2="3"/><line x1="20" x2="20" y1="21" y2="16"/><line x1="20" x2="20" y1="12" y2="3"/><line x1="1" x2="7" y1="14" y2="14"/><line x1="9" x2="15" y1="8" y2="8"/><line x1="17" x2="23" y1="16" y2="16"/>'),
-  trash: _svgStroke('<path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>'),
-  maximize: _svgStroke('<path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/>'),
-  edit: _svgStroke('<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/>'),
-  grip: _svgStroke('<circle cx="9" cy="6" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="9" cy="18" r="1"/><circle cx="15" cy="6" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="18" r="1"/>'),
-  lyrics: _svgStroke('<path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/>'),
-  plusSm: _svgStroke('<path d="M12 5v14"/><path d="M5 12h14"/>'),
-  minimize: _svgStroke('<path d="M8 3v3a2 2 0 0 1-2 2H3"/><path d="M21 8h-3a2 2 0 0 1-2-2V3"/><path d="M3 16h3a2 2 0 0 1 2 2v3"/><path d="M16 21v-3a2 2 0 0 1 2-2h3"/>')
-};
 
 function applyPlayerIcons() {
   $('shuffleBtn').innerHTML = ICONS.shuffle;
@@ -3061,6 +2998,12 @@ function applyPlayerIcons() {
 }
 
 const audio = new Audio();
+// O áudio vem do protocolo custom mp3file:// (outra origem). Para roteá-lo pelo
+// grafo Web Audio (createMediaElementSource) sem o Chromium silenciar a fonte por
+// "cross-origin taint", o elemento precisa ser CORS-clean. O handler já envia
+// Access-Control-Allow-Origin: *, então 'anonymous' basta. (Regressão exposta no
+// Electron 41 / Chromium novo, que passou a impor isso de forma estrita.)
+audio.crossOrigin = 'anonymous';
 
 // ---- Visualizador de espectro (Web Audio API) ----
 // Liga o <audio> a um AnalyserNode e desenha as frequências num canvas atrás
@@ -3068,14 +3011,6 @@ const audio = new Audio();
 // a fluir pelo grafo — por isso o AudioContext precisa estar "running" (resume).
 let audioCtx = null, analyser = null, sourceNode = null, freqData = null;
 // Equalizador de 6 bandas (2 graves, 2 médios, 2 agudos) via BiquadFilter
-const EQ_BANDS = [
-  { f: 80, type: 'lowshelf', label: '80' },
-  { f: 200, type: 'peaking', label: '200' },
-  { f: 600, type: 'peaking', label: '600' },
-  { f: 2000, type: 'peaking', label: '2k' },
-  { f: 5000, type: 'peaking', label: '5k' },
-  { f: 12000, type: 'highshelf', label: '12k' }
-];
 let eqFilters = null;
 let eqGains = [0, 0, 0, 0, 0, 0];
 let eqEnabled = false;
@@ -3109,56 +3044,9 @@ function ensureAnalyser() {
 }
 
 // HSL helpers p/ derivar as cores das barras a partir da paleta da capa
-function rgbToHsl(r, g, b) {
-  r /= 255; g /= 255; b /= 255;
-  const max = Math.max(r, g, b), min = Math.min(r, g, b);
-  let h = 0, s = 0; const l = (max + min) / 2;
-  if (max !== min) {
-    const d = max - min;
-    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
-    if (max === r) h = (g - b) / d + (g < b ? 6 : 0);
-    else if (max === g) h = (b - r) / d + 2;
-    else h = (r - g) / d + 4;
-    h /= 6;
-  }
-  return { h: h * 360, s, l };
-}
-function hslToRgb(h, s, l) {
-  h /= 360; let r, g, b;
-  if (s === 0) { r = g = b = l; } else {
-    const hue2rgb = (p, q, t) => {
-      if (t < 0) t += 1; if (t > 1) t -= 1;
-      if (t < 1 / 6) return p + (q - p) * 6 * t;
-      if (t < 1 / 2) return q;
-      if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
-      return p;
-    };
-    const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
-    const p = 2 * l - q;
-    r = hue2rgb(p, q, h + 1 / 3); g = hue2rgb(p, q, h); b = hue2rgb(p, q, h - 1 / 3);
-  }
-  return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
-}
 // cores das barras: fiéis à paleta da capa (MESMO matiz), com saturação preservada
 // e o contraste vindo só da luminosidade — deslocada na direção do texto do card
 // (clareia sobre capa escura, escurece sobre capa clara) para "destoar" do fundo.
-function deriveBarColors(pal) {
-  if (!pal) return { bottom: 'rgba(0,122,255,0.85)', top: 'rgba(110,170,255,0.97)' };
-  const { h, s, l } = rgbToHsl(pal.r, pal.g, pal.b);
-  const dark = pal.text === '#ffffff'; // capa escura → barras mais claras; clara → mais escuras
-  // preserva a vivacidade da capa, com um leve reforço e um piso p/ capas acinzentadas
-  const sat = Math.min(1, Math.max(0.4, s * 1.12 + 0.06));
-  // a base da barra fica perto da luminosidade da própria capa; o topo brilha
-  const lBottom = dark
-    ? Math.min(0.62, Math.max(0.40, l + 0.10))
-    : Math.max(0.34, Math.min(0.50, l - 0.10));
-  const lTop = dark
-    ? Math.min(0.86, lBottom + 0.22)
-    : Math.min(0.66, lBottom + 0.20);
-  const [r1, g1, b1] = hslToRgb(h, sat, lBottom);
-  const [r2, g2, b2] = hslToRgb(h, Math.min(1, sat + 0.06), lTop);
-  return { bottom: `rgba(${r1},${g1},${b1},0.88)`, top: `rgba(${r2},${g2},${b2},0.98)` };
-}
 
 let vizCard = null, vizCanvas = null, vizCtx = null, vizRAF = null;
 
@@ -3167,14 +3055,6 @@ let vizCard = null, vizCanvas = null, vizCtx = null, vizRAF = null;
 let barTargetPal = { r: 124, g: 92, b: 255, text: '#ffffff' };
 let vizCurPal = null;
 let npCurPal = null;
-function lerpPal(cur, target, k) {
-  if (!cur) return { r: target.r, g: target.g, b: target.b, text: target.text };
-  const r = cur.r + (target.r - cur.r) * k;
-  const g = cur.g + (target.g - cur.g) * k;
-  const b = cur.b + (target.b - cur.b) * k;
-  const lum = 0.299 * r + 0.587 * g + 0.114 * b;
-  return { r, g, b, text: lum > 150 ? '#1d1d1f' : '#ffffff' };
-}
 
 function resizeViz() {
   if (!vizCanvas || !vizCard) return;
@@ -3672,7 +3552,7 @@ function npOpen() { return !$('nowPlaying').classList.contains('hidden'); }
 function lyricsEditorOpen() { return !$('lyricsEditorModal').classList.contains('hidden'); }
 function blockedDuringLyricsEdit() {
   if (lyricsEditorOpen()) {
-    toast('Finalize e salve a edição da letra para habilitar esta função.', '');
+    toast(t('lyrics.toast.finishEdit'), '');
     return true;
   }
   return false;
@@ -3834,33 +3714,6 @@ let npLyricTrack = null;    // wrapper das linhas, animado via transform (GPU)
 let npLyricTrackTop = 0;    // offsetTop do wrapper dentro da janela (padding superior)
 let npLyricMaxTop = 0;      // limite inferior da rolagem
 
-function isSyncedLyrics(text) { return !!(text && /\[\d{1,2}:\d{1,2}(?:[.:]\d{1,3})?\]/.test(text)); }
-function parseLrc(text) {
-  if (!text) return null;
-  const out = [];
-  let offset = 0;
-  const tagRe = /\[(\d{1,2}):(\d{1,2}(?:[.:]\d{1,3})?)\]/g;
-  for (const raw of String(text).split(/\r?\n/)) {
-    const off = raw.match(/^\s*\[offset:\s*(-?\d+)\]/i);
-    if (off) { offset = parseInt(off[1], 10) / 1000; continue; }
-    if (/^\s*\[(ti|ar|al|au|by|length|re|ve|tool|#):/i.test(raw)) continue;
-    const times = []; let m; tagRe.lastIndex = 0;
-    while ((m = tagRe.exec(raw)) !== null) {
-      times.push(parseInt(m[1], 10) * 60 + parseFloat(m[2].replace(':', '.')));
-    }
-    if (!times.length) continue;
-    const txt = raw.replace(tagRe, '').trim();
-    for (const t of times) out.push({ t: t + offset, text: txt });
-  }
-  out.sort((a, b) => a.t - b.t);
-  return out.length ? out : null;
-}
-function lrcToPlain(text) {
-  return String(text || '').split(/\r?\n/)
-    .filter((l) => !/^\s*\[(ti|ar|al|au|by|length|re|ve|offset|tool|#):/i.test(l))
-    .map((l) => l.replace(/\[[^\]]*\]/g, '').trim())
-    .join('\n').replace(/\n{3,}/g, '\n\n').trim();
-}
 
 // carrega a letra da faixa atual (lê a tag) e prepara o karaokê
 async function loadCurrentLyrics(filePath) {
@@ -4215,15 +4068,7 @@ applyPlayerIcons();
 
 // ====================== Equalizador ======================
 // nomes via chave de tradução (resolvidos na hora de renderizar)
-const EQ_BUILTINS = [
-  { nameKey: 'eq.preset.flat', gains: [0, 0, 0, 0, 0, 0], builtin: true },
-  { nameKey: 'eq.preset.bass', gains: [6, 4, 0, 0, 0, 1], builtin: true },
-  { nameKey: 'eq.preset.voice', gains: [-2, -1, 2, 4, 2, 0], builtin: true },
-  { nameKey: 'eq.preset.bright', gains: [0, 0, 0, 1, 4, 5], builtin: true },
-  { nameKey: 'eq.preset.loudness', gains: [5, 2, 0, 0, 2, 4], builtin: true }
-];
 
-function fmtDb(g) { return `${g > 0 ? '+' : ''}${g} dB`; }
 
 // aplica os ganhos atuais aos filtros (0 quando o EQ está desligado = bypass)
 function applyEq() {
@@ -4276,7 +4121,6 @@ function renderEqBands() {
   });
 }
 
-function allEqPresets() { return EQ_BUILTINS.concat(eqPresets); }
 function renderEqPresetOptions() {
   const sel = $('eqPreset');
   sel.innerHTML = '';
@@ -4541,16 +4385,8 @@ function hideScanIndicator() { syncStatusMsg = null; refreshToolbarStatus(); }
 const deviceStats = {};      // serial -> { pendingCount, pendingBytes }
 const deviceConnInfo = {};   // serial -> { free, size, connected }
 
-function cssEsc(s) { return (window.CSS && CSS.escape) ? CSS.escape(s) : s; }
 function setDevicesBusy(b) { $('devicesBtn').classList.toggle('syncing', b); }
 
-function fmtBytes(n) {
-  n = Number(n) || 0;
-  const u = ['B', 'KB', 'MB', 'GB', 'TB'];
-  let i = 0;
-  while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
-  return `${(n >= 10 || i === 0) ? Math.round(n) : n.toFixed(1)} ${u[i]}`;
-}
 
 // artistas únicos da biblioteca (chave normalizada → nome de exibição)
 function libraryArtists() {

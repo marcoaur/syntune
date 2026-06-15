@@ -1,3 +1,11 @@
+/**
+ * @module  i18n
+ * @badge   ⬜ UTIL · I18N · STATEFUL(idioma atual) · NO-NET
+ * @role    Motor de idiomas: casa o locale do SO com locales/<idioma>.json e expõe t(), getLanguage(), getStrings().
+ * @inputs  locale do sistema, locales/*.json, chave + vars
+ * @outputs string traduzida, idioma ativo, dicionário
+ * @deps    fs, path, electron(app)
+ */
 // ====================================================================
 // Motor de idiomas (i18n)
 // --------------------------------------------------------------------

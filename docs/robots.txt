@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://marcoaur.github.io/syntune/sitemap.xml

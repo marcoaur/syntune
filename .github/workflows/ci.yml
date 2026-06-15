@@ -12,16 +12,20 @@ jobs:
   checks:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
 
       - name: Syntax check (all project JS)
+        shell: bash
         run: |
           set -e
-          for f in main.js preload.js i18n.js sync-engine.js sync-worker.js scripts/*.js renderer/*.js; do
+          shopt -s globstar nullglob
+          # Todo JS do projeto (cobre src/** e renderer/modules/** automaticamente).
+          for f in **/*.js; do
+            [[ "$f" == node_modules/* ]] && continue
             echo "node --check $f"
             node --check "$f"
           done
@@ -37,13 +41,18 @@ jobs:
       - name: i18n key parity
         run: node scripts/check-i18n.js
 
-  # Teste de empacotamento: garante que o app monta (sem gerar instaladores)
+  # Teste de empacotamento multiplataforma: garante que o app monta em
+  # Windows, macOS e Linux (sem gerar instaladores — só o app empacotado).
   pack:
-    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: npm
@@ -51,5 +60,26 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Unit tests (node:test)
+        run: npm test
+
       - name: Electron pack test (dir only)
         run: npm run dist -- --dir --publish never
+
+  # Smoke E2E: lança o app real e garante boot + render sem erro de JS.
+  # Trava o merge p/ main (logo, o release) se o app não abrir.
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Smoke E2E (Electron via Playwright + xvfb)
+        run: xvfb-run --auto-servernum npm run test:e2e

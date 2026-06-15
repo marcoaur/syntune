@@ -1,168 +1,42 @@
-const { app, BrowserWindow, ipcMain, dialog, nativeTheme, shell, protocol, net, safeStorage } = require('electron');
+/**
+ * @module  main
+ * @badge   🟥 CORE · IPC-REGISTRY · CRYPTO · FS · ORCHESTRATION
+ * @role    Bootstrap Electron, janela, protocolos custom, segredos cifrados, config, auto-update, e registro de TODOS os ipcMain.handle; orquestra os módulos especialistas (src/**).
+ * @inputs  ciclo de vida do app, IPC do renderer (via preload), config.json/secrets.enc
+ * @outputs janela, eventos IPC, arquivos em userData
+ * @deps    electron, src/media/id3, src/services/{metadata-sources,gemini,lastfm}, sync-engine, i18n
+ * @notes   Ainda contém: YouTube, LRCLIB, Genius, devices/sync (alvos de migração — ver AGENTS.md).
+ */
+const { app, BrowserWindow, ipcMain, dialog, nativeTheme, shell, protocol, net } = require('electron');
 const path = require('path');
 const fs = require('fs');
-const { spawn } = require('child_process');
 const { pathToFileURL } = require('url');
-const { Worker } = require('worker_threads');
 const NodeID3 = require('node-id3');
-const YTDlpWrap = require('yt-dlp-wrap').default;
-const { createGunzip } = require('zlib');
-const { pipeline } = require('stream/promises');
 const { Readable } = require('stream');
 const i18n = require('./i18n');
 const t = i18n.t;
+
+// ---------- Módulos especialistas (migração monolito → módulos) ----------
+// Ver AGENTS.md (badges) e src/**/README.md (mapas de fluxo).
+const { readId3Fast, lyricsText, readLrclibSync, writeLrclibSync, coverDataUrl, imagePreviewDataUrl, LRCLIB_SYNC_DESC } = require('./src/media/id3'); // 🟩 MEDIA
+const { mbSearchRecordings, mbToMatches, itunesLookup, gatherFacts, consolidateFacts, fetchFactualCover, parseArtistTitle, factsBlock, fuzzyMatch, normName } = require('./src/services/metadata-sources'); // 🟦 SERVICE
+const lastfm = require('./src/services/lastfm'); // 🟦 SERVICE
+const createGeminiService = require('./src/services/gemini'); // 🟦 SERVICE (factory-DI)
+const { ensureYtDlp, ensureFfmpeg, sanitizeName, isYouTubeUrl, fetchYouTubeContext } = require('./src/services/youtube'); // 🟦 SERVICE
+const { fetchLrclib, isSyncedLyricsText, solveLrclibChallenge } = require('./src/services/lyrics-lrclib'); // 🟦 SERVICE
+const { resolveArtistImage, ARTISTS_DIR } = require('./src/services/artist-image'); // 🟦 SERVICE
+const { initSecrets, readRawConfig, readConfig, writeConfig, getLibraryDir, isSecureMode, SECRET_FIELDS } = require('./src/config/config-store'); // 🟪 CONFIG
+const createSyncController = require('./src/devices/sync-controller'); // 🟨 DEVICE (factory-DI)
 
 // Em modo desenvolvimento (npm start), separa o userData do app instalado para
 // evitar conflitos de GPUCache/lock entre as duas instâncias.
 if (!app.isPackaged) {
   app.setPath('userData', path.join(app.getPath('appData'), 'syntune-dev'));
 }
-const CONFIG_PATH = () => path.join(app.getPath('userData'), 'config.json');
 
-// ---------- Segredos: criptografia em repouso (envelope + safeStorage) ----------
-// As chaves de API NÃO vivem mais em plaintext no config.json: ficam em
-// secrets.enc, cifradas com AES-256-GCM por uma master key aleatória de
-// 32 bytes gerada na 1ª execução. A master key é guardada cifrada pelo
-// cofre do sistema operacional (Windows DPAPI / macOS Keychain / Linux
-// Secret Service) via safeStorage — o app a usa, mas quem a guarda é o SO.
-// Preferências (pasta, devices, playlists…) continuam legíveis no config.json.
-// Sem cofre disponível (ex.: Linux sem keyring): fallback plaintext + aviso na UI.
-const SECRET_FIELDS = ['apiKey', 'lastfmApiKey', 'lastfmSecret', 'lastfmSessionKey', 'geniusToken'];
-const MASTER_KEY_PATH = () => path.join(app.getPath('userData'), 'master.key');
-const SECRETS_PATH = () => path.join(app.getPath('userData'), 'secrets.enc');
-const SECRETS_MAGIC = Buffer.from('SYN1'); // cabeçalho + versão do formato
-
-let secureMode = false;  // cofre do SO disponível?
-let masterKey = null;    // Buffer(32) — existe apenas em memória
-let secretsCache = {};   // segredos decriptados, mesclados em readConfig()
-
-function loadOrCreateMasterKey() {
-  const p = MASTER_KEY_PATH();
-  if (fs.existsSync(p)) {
-    try {
-      return Buffer.from(safeStorage.decryptString(fs.readFileSync(p)), 'base64');
-    } catch {
-      // Perfil do SO mudou (reinstalação, usuário novo): a chave antiga é
-      // irrecuperável por design. Recomeça — o usuário recola as chaves de API.
-      console.warn('[secrets] master.key irrecuperável; segredos serão re-solicitados.');
-      try { fs.rmSync(SECRETS_PATH(), { force: true }); } catch { /* ok */ }
-    }
-  }
-  const key = crypto.randomBytes(32);
-  fs.writeFileSync(p, safeStorage.encryptString(key.toString('base64')));
-  return key;
-}
-
-function encryptSecrets(obj) {
-  const iv = crypto.randomBytes(12);
-  const cipher = crypto.createCipheriv('aes-256-gcm', masterKey, iv);
-  const ct = Buffer.concat([cipher.update(JSON.stringify(obj), 'utf-8'), cipher.final()]);
-  return Buffer.concat([SECRETS_MAGIC, iv, cipher.getAuthTag(), ct]);
-}
-
-function decryptSecrets(buf) {
-  if (!buf || buf.length < 33 || !buf.subarray(0, 4).equals(SECRETS_MAGIC)) return {};
-  const iv = buf.subarray(4, 16);
-  const tag = buf.subarray(16, 32);
-  const ct = buf.subarray(32);
-  const decipher = crypto.createDecipheriv('aes-256-gcm', masterKey, iv);
-  decipher.setAuthTag(tag); // GCM: arquivo adulterado falha aqui, não vira lixo
-  return JSON.parse(Buffer.concat([decipher.update(ct), decipher.final()]).toString('utf-8'));
-}
-
-function persistSecrets() {
-  try { fs.writeFileSync(SECRETS_PATH(), encryptSecrets(secretsCache)); }
-  catch (err) { console.warn('[secrets] falha ao gravar secrets.enc:', err.message); }
-}
-
-// Chamado no app ready: ativa o modo seguro, carrega os segredos e migra
-// chaves plaintext que ainda estejam no config.json (instalações antigas).
-function initSecrets() {
-  try { secureMode = safeStorage.isEncryptionAvailable(); } catch { secureMode = false; }
-  if (!secureMode) {
-    console.warn('[secrets] cofre do SO indisponível — chaves permanecem em plaintext no config.json.');
-    return;
-  }
-  masterKey = loadOrCreateMasterKey();
-  if (fs.existsSync(SECRETS_PATH())) {
-    try {
-      secretsCache = decryptSecrets(fs.readFileSync(SECRETS_PATH()));
-    } catch (err) {
-      console.warn('[secrets] secrets.enc ilegível (perfil novo/arquivo adulterado):', err.message);
-      secretsCache = {};
-    }
-  }
-  // migração: move segredos plaintext do config.json para o cofre
-  const raw = readRawConfig();
-  const found = SECRET_FIELDS.filter((f) => raw[f]);
-  if (found.length) {
-    for (const f of found) { secretsCache[f] = raw[f]; delete raw[f]; }
-    persistSecrets();
-    try { fs.writeFileSync(CONFIG_PATH(), JSON.stringify(raw, null, 2), 'utf-8'); } catch { /* best-effort */ }
-    console.log(`[secrets] ${found.length} segredo(s) migrado(s) para armazenamento cifrado.`);
-  }
-}
-
-// config.json cru, sem os segredos (preferências apenas).
-// Remove o BOM antes do parse: arquivos editados no Notepad vêm com BOM e
-// quebrariam o JSON.parse, fazendo a config inteira cair nos defaults.
-function readRawConfig() {
-  try {
-    return JSON.parse(fs.readFileSync(CONFIG_PATH(), 'utf-8').replace(/^\uFEFF/, ''));
-  } catch {
-    return { apiKey: '', lastfmApiKey: '', geniusToken: '', model: 'gemini-2.5-flash', downloadFolder: '' };
-  }
-}
-
-// visão completa: preferências + segredos decriptados
-function readConfig() {
-  const cfg = readRawConfig();
-  if (secureMode) Object.assign(cfg, secretsCache);
-  return cfg;
-}
-
-// Pasta onde a biblioteca de músicas é guardada.
-// Usa a pasta configurada pelo usuário; se não houver (ou se o caminho estiver
-// inacessível — unidade removida, caminho de rede, sem permissão), cai na pasta
-// temporária para não travar o startup.
-function getLibraryDir() {
-  const cfg = readConfig();
-  const configured = cfg.downloadFolder && cfg.downloadFolder.trim();
-  const fallback = path.join(app.getPath('temp'), 'syntune', 'library');
-
-  if (configured) {
-    try {
-      fs.mkdirSync(configured, { recursive: true });
-      // Verifica acesso de leitura/escrita rapidamente
-      fs.accessSync(configured, fs.constants.R_OK | fs.constants.W_OK);
-      return configured;
-    } catch {
-      // Caminho inacessível: usa pasta temporária como fallback seguro
-      console.warn('[getLibraryDir] Pasta configurada inacessível, usando fallback:', configured);
-    }
-  }
-
-  try { fs.mkdirSync(fallback, { recursive: true }); } catch { /* já existe */ }
-  return fallback;
-}
-
-// grava o config separando segredos (-> secrets.enc) de preferências (-> config.json)
-function writeConfig(cfg) {
-  if (secureMode) {
-    const plain = { ...cfg };
-    let touched = false;
-    for (const f of SECRET_FIELDS) {
-      if (f in plain) {
-        if ((secretsCache[f] || '') !== (plain[f] || '')) { secretsCache[f] = plain[f]; touched = true; }
-        delete plain[f];
-      }
-    }
-    if (touched) persistSecrets();
-    fs.writeFileSync(CONFIG_PATH(), JSON.stringify(plain, null, 2), 'utf-8');
-  } else {
-    fs.writeFileSync(CONFIG_PATH(), JSON.stringify(cfg, null, 2), 'utf-8');
-  }
-}
+// Instancia o serviço Gemini injetando o acesso a config (factory-DI):
+// loadGeminiUsage/persistGeminiUsage usam readConfig/writeConfig p/ persistir o RPD.
+const { callGemini, loadGeminiUsage, ID3_SCHEMA } = createGeminiService({ readConfig, writeConfig });
 
 // ---------- Janela ----------
 let mainWindow;
@@ -330,10 +204,10 @@ app.whenReady().then(() => {
   i18n.init({ locale: app.getLocale(), readConfig, writeConfig });
   loadGeminiUsage(); // restaura a contagem diária (RPD) do config.json
   createWindow();
-  startDevicePolling(); // monitora armazenamentos removíveis (MP4/pendrive)
+  devices.startPolling(); // monitora armazenamentos removíveis (MP4/pendrive)
   setupAutoUpdate();    // busca atualizações nas releases do GitHub
   // cofre indisponível + chaves presentes: avisa o usuário (toast na UI)
-  if (!secureMode && SECRET_FIELDS.some((f) => readRawConfig()[f])) {
+  if (!isSecureMode() && SECRET_FIELDS.some((f) => readRawConfig()[f])) {
     mainWindow.webContents.once('did-finish-load', () => {
       setTimeout(() => {
         if (mainWindow && !mainWindow.isDestroyed()) {
@@ -354,10 +228,7 @@ app.on('window-all-closed', () => {
 // Limpeza de recursos antes de sair: garante que timers e workers não deixem
 // o processo vivo após o fechamento da janela.
 app.on('before-quit', () => {
-  // Para o polling de dispositivos
-  if (devicePollTimer) { clearInterval(devicePollTimer); devicePollTimer = null; }
-  // Encerra o worker de sincronização
-  if (syncWorker) { try { syncWorker.terminate(); } catch { /* ok */ } syncWorker = null; }
+  devices.dispose(); // para o polling de dispositivos e encerra o worker de sync
 });
 
 // ---------- IPC: controles da janela ----------
@@ -389,7 +260,26 @@ nativeTheme.on('updated', () => {
 ipcMain.handle('app:getVersion', () => app.getVersion());
 
 // ---------- IPC: idioma e textos da interface ----------
-ipcMain.handle('i18n:get', () => ({ lang: i18n.getLanguage(), strings: i18n.getStrings() }));
+ipcMain.handle('i18n:get', () => ({
+  lang: i18n.getLanguage(),
+  strings: i18n.getStrings(),
+  available: i18n.availableLanguages(),       // idiomas disponíveis em locales/
+  configured: readConfig().language || null   // escolha manual (null = automático/locale)
+}));
+
+// Define o idioma da UI, ignorando o locale do SO. Valor vazio/'auto' remove a
+// escolha → volta a detectar pelo locale. Aplica reiniciando o app (recarrega o
+// i18n de forma limpa, sem ter de re-renderizar toda a UI em runtime).
+ipcMain.handle('i18n:setLanguage', (_e, lang) => {
+  const cfg = readConfig();
+  const langs = i18n.availableLanguages();
+  const v = lang ? String(lang).toLowerCase() : '';
+  if (v && langs.includes(v)) cfg.language = v;
+  else delete cfg.language;
+  writeConfig(cfg);
+  app.relaunch();
+  app.exit(0);
+});
 
 // ---------- IPC: configuração ----------
 ipcMain.handle('config:get', () => readConfig());
@@ -401,121 +291,6 @@ ipcMain.handle('config:set', (_e, cfg) => {
   return merged;
 });
 
-// ---------- YouTube: binário do yt-dlp (download único na 1ª vez) ----------
-const YTDLP_PATH = () =>
-  path.join(app.getPath('userData'), process.platform === 'win32' ? 'yt-dlp.exe' : 'yt-dlp');
-
-// guarda para evitar download duplicado do binário quando 2 jobs iniciam juntos
-let ytDlpDownloadPromise = null;
-async function ensureYtDlp(onStatus) {
-  const bin = YTDLP_PATH();
-  if (!fs.existsSync(bin)) {
-    if (onStatus) onStatus(t('main.preparingDownloader'));
-    if (!ytDlpDownloadPromise) {
-      ytDlpDownloadPromise = YTDlpWrap.downloadFromGithub(bin)
-        .finally(() => { ytDlpDownloadPromise = null; });
-    }
-    await ytDlpDownloadPromise;
-  }
-  return new YTDlpWrap(bin);
-}
-
-// ---------- ffmpeg: binário baixado na 1ª vez (como o yt-dlp) ----------
-// Substitui o ffmpeg-static empacotado (~79 MB no instalador). Baixa o MESMO
-// binário, do mesmo release do ffmpeg-static no GitHub, para o userData.
-const FFMPEG_RELEASE = 'b6.1.1';
-const FFMPEG_PATH = () =>
-  path.join(app.getPath('userData'), process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg');
-
-// guarda para evitar download duplicado quando 2 jobs iniciam juntos
-let ffmpegDownloadPromise = null;
-async function ensureFfmpeg(onStatus) {
-  const bin = FFMPEG_PATH();
-  if (fs.existsSync(bin)) return bin;
-  if (onStatus) onStatus(t('main.preparingConverter'));
-  if (!ffmpegDownloadPromise) {
-    ffmpegDownloadPromise = (async () => {
-      const url = `https://github.com/eugeneware/ffmpeg-static/releases/download/${FFMPEG_RELEASE}/ffmpeg-${process.platform}-${process.arch}.gz`;
-      const res = await fetch(url, { redirect: 'follow' });
-      if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
-      // grava num .download e renomeia no fim: nunca deixa um binário pela metade
-      const tmp = bin + '.download';
-      await pipeline(Readable.fromWeb(res.body), createGunzip(), fs.createWriteStream(tmp));
-      if (process.platform !== 'win32') fs.chmodSync(tmp, 0o755);
-      fs.renameSync(tmp, bin);
-      return bin;
-    })().finally(() => { ffmpegDownloadPromise = null; });
-  }
-  return ffmpegDownloadPromise;
-}
-
-function sanitizeName(name) {
-  return (name || 'audio').replace(/[<>:"/\\|?*\x00-\x1f]/g, '').trim().slice(0, 120) || 'audio';
-}
-
-function isYouTubeUrl(url) {
-  return /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be|music\.youtube\.com)\//i.test(url || '');
-}
-
-// Coleta o contexto rico da página do YouTube para alimentar o pipeline do Gemini:
-// título, canal, link, descrição do autor, tags/categorias e os ~10 comentários
-// do topo. (Obs.: "vídeos relacionados" não são expostos pelo yt-dlp de forma
-// confiável; as tags/categorias cumprem papel semelhante de sinal de contexto.)
-async function fetchYouTubeContext(ytDlp, url, onStatus) {
-  if (onStatus) onStatus(t('main.readingYouTube'));
-
-  const baseArgs = [url, '--no-playlist', '--skip-download', '--dump-single-json'];
-
-  let info = null;
-  // 1ª tentativa: com comentários (pode ser mais lento / às vezes bloqueado)
-  try {
-    const out = await ytDlp.execPromise([
-      ...baseArgs,
-      '--write-comments',
-      '--extractor-args', 'youtube:max_comments=10,10,0,0;comment_sort=top'
-    ]);
-    info = JSON.parse(out);
-  } catch {
-    /* tenta sem comentários abaixo */
-  }
-  // fallback: sem comentários
-  if (!info) {
-    try {
-      const out = await ytDlp.execPromise(baseArgs);
-      info = JSON.parse(out);
-    } catch {
-      return null; // segue sem contexto rico
-    }
-  }
-
-  const comments = Array.isArray(info.comments)
-    ? info.comments
-        .filter((c) => c && typeof c.text === 'string')
-        .slice(0, 10)
-        .map((c) => c.text.replace(/\s+/g, ' ').trim())
-        .filter(Boolean)
-    : [];
-
-  return {
-    videoTitle: info.title || '',
-    channel: info.uploader || info.channel || '',
-    channelUrl: info.uploader_url || info.channel_url || '',
-    videoUrl: info.webpage_url || url,
-    description: (info.description || '').slice(0, 3000),
-    tags: Array.isArray(info.tags) ? info.tags.slice(0, 25) : [],
-    categories: Array.isArray(info.categories) ? info.categories : [],
-    duration: info.duration_string || '',
-    uploadDate: info.upload_date || '',
-    comments,
-    thumbnail: (info.thumbnail || '').startsWith('http') ? info.thumbnail : '',
-    // metadados de música expostos pelo YouTube Music (quando houver) — boa semente
-    musicArtist: info.artist || '',
-    musicTrack: info.track || '',
-    musicAlbum: info.album || '',
-    musicYear: info.release_year ? String(info.release_year)
-      : (info.release_date ? String(info.release_date).slice(0, 4) : '')
-  };
-}
 
 // ---------- IPC: baixar MP3 do YouTube ----------
 // Aceita uma string (URL) ou um objeto { jobId, url }. O jobId acompanha os
@@ -653,32 +428,6 @@ function uniquePath(destPath) {
   return candidate;
 }
 
-// Lê as tags ID3 de forma rápida: em vez de carregar o arquivo inteiro
-// (o que trava em MP3s grandes/com capa), lê só a região do cabeçalho ID3v2,
-// que fica no início do arquivo. Cai para a leitura completa apenas quando
-// não há ID3v2 no início (ex.: somente ID3v1 no fim).
-function readId3Fast(filePath) {
-  let tags = null;
-  const fd = fs.openSync(filePath, 'r');
-  try {
-    const header = Buffer.alloc(10);
-    const got = fs.readSync(fd, header, 0, 10, 0);
-    if (got === 10 && header.toString('latin1', 0, 3) === 'ID3') {
-      // tamanho "synchsafe" (7 bits úteis por byte)
-      const size = ((header[6] & 0x7f) << 21) | ((header[7] & 0x7f) << 14) |
-                   ((header[8] & 0x7f) << 7) | (header[9] & 0x7f);
-      const footer = (header[5] & 0x10) ? 10 : 0;
-      const total = 10 + size + footer;
-      const buf = Buffer.alloc(total);
-      fs.readSync(fd, buf, 0, total, 0);
-      tags = NodeID3.read(buf);
-    }
-  } finally {
-    fs.closeSync(fd);
-  }
-  if (!tags) tags = NodeID3.read(filePath); // sem ID3v2 no início
-  return tags || {};
-}
 
 // ---------- IPC: ler tags existentes do MP3 ----------
 ipcMain.handle('mp3:readTags', (_e, filePath) => {
@@ -706,45 +455,6 @@ ipcMain.handle('mp3:readTags', (_e, filePath) => {
   return out;
 });
 
-// extrai o texto da letra (unsynchronisedLyrics pode ser objeto ou array)
-function lyricsText(tags) {
-  const ul = tags && tags.unsynchronisedLyrics;
-  if (!ul) return '';
-  if (Array.isArray(ul)) return (ul[0] && ul[0].text) || '';
-  return ul.text || '';
-}
-
-// ---------- Tag de sincronização LRCLIB (TXXX:LRCLIB_SYNC) ----------
-// Valores: 'synced' | 'local' | 'not_found'
-// Ausente = pendente (arquivo nunca passou pelo fluxo de letras).
-const LRCLIB_SYNC_DESC = 'LRCLIB_SYNC';
-
-function readLrclibSync(filePath) {
-  try {
-    const tags = readId3Fast(filePath);
-    const txxx = tags.userDefinedText || [];
-    const arr = Array.isArray(txxx) ? txxx : [txxx];
-    const hit = arr.find((x) => x && x.description === LRCLIB_SYNC_DESC);
-    return hit ? hit.value : null;
-  } catch { return null; }
-}
-
-function writeLrclibSync(filePath, value) {
-  try {
-    // Lê os frames TXXX existentes para não sobrescrever outros
-    const tags = readId3Fast(filePath);
-    const existing = Array.isArray(tags.userDefinedText)
-      ? tags.userDefinedText
-      : (tags.userDefinedText ? [tags.userDefinedText] : []);
-    const others = existing.filter((x) => x && x.description !== LRCLIB_SYNC_DESC);
-    const merged = [...others, { description: LRCLIB_SYNC_DESC, value }];
-    NodeID3.update({ userDefinedText: merged }, filePath);
-    return true;
-  } catch (err) {
-    console.warn('[writeLrclibSync]', err.message);
-    return false;
-  }
-}
 
 // ---------- IPC: ler/gravar tag de sincronização LRCLIB ----------
 ipcMain.handle('lyrics:getSyncStatus', (_e, filePath) => {
@@ -753,7 +463,7 @@ ipcMain.handle('lyrics:getSyncStatus', (_e, filePath) => {
 });
 
 ipcMain.handle('lyrics:setSyncStatus', (_e, { filePath, status }) => {
-  if (!filePath || !fs.existsSync(filePath)) return { error: 'file not found' };
+  if (!filePath || !fs.existsSync(filePath)) return { error: t('main.fileNotFound') };
   writeLrclibSync(filePath, status);
   return { ok: true };
 });
@@ -823,222 +533,11 @@ ipcMain.handle('library:delete', (_e, filePath) => {
 });
 
 // ---------- IPC: capa do MP3 como data URL (lazy, sob demanda) ----------
-ipcMain.handle('mp3:cover', (_e, filePath) => {
-  if (!filePath || !fs.existsSync(filePath)) return null;
-  try {
-    const tags = readId3Fast(filePath);
-    if (!tags.image || !tags.image.imageBuffer) return null;
-    const mime = tags.image.mime || 'image/jpeg';
-    return `data:${mime};base64,${tags.image.imageBuffer.toString('base64')}`;
-  } catch { return null; }
-});
+ipcMain.handle('mp3:cover', (_e, filePath) => coverDataUrl(filePath));
 
 // ---------- IPC: ler imagem como data URL (preview) ----------
-ipcMain.handle('image:preview', (_e, imagePath) => {
-  try {
-    const buf = fs.readFileSync(imagePath);
-    const ext = path.extname(imagePath).toLowerCase();
-    const mime = ext === '.png' ? 'image/png' : 'image/jpeg';
-    return `data:${mime};base64,${buf.toString('base64')}`;
-  } catch {
-    return null;
-  }
-});
+ipcMain.handle('image:preview', (_e, imagePath) => imagePreviewDataUrl(imagePath));
 
-// ---------- Gemini: motor de limite de requisições (por modelo, FIFO) ----------
-// Cada modelo tem seus próprios limites: RPM (requisições/min), TPM (tokens/min)
-// e RPD (requisições/dia). Toda chamada passa por aqui; quando algum limite do
-// modelo está saturado, as próximas chamadas DAQUELE modelo aguardam em fila,
-// preservando a ordem de chegada (que reflete a ordem de término dos downloads).
-// Modelos diferentes não bloqueiam uns aos outros.
-const MODEL_LIMITS = {
-  'gemini-3.1-flash-lite': { rpm: 15, tpm: 250000, rpd: 500 },
-  'gemini-2.5-flash': { rpm: 5 }
-};
-const DEFAULT_LIMITS = { rpm: 5 };
-const RPM_WINDOW = 60_000;
-const TPM_WINDOW = 60_000;
-const RPD_WINDOW = 24 * 60 * 60_000;
-
-function getLimits(model) { return MODEL_LIMITS[model] || DEFAULT_LIMITS; }
-
-// estado de uso por modelo
-const geminiState = new Map(); // model -> { reqTimes:[], tokenEvents:[{t,tokens}], dayTimes:[] }
-function stateFor(model) {
-  let s = geminiState.get(model);
-  if (!s) { s = { reqTimes: [], tokenEvents: [], dayTimes: [] }; geminiState.set(model, s); }
-  return s;
-}
-
-let geminiWaitQueue = [];   // { model, tokens, resolve, onWait }
-let geminiPumpTimer = null;
-
-function pruneState(s, now) {
-  s.reqTimes = s.reqTimes.filter((t) => now - t < RPM_WINDOW);
-  s.tokenEvents = s.tokenEvents.filter((e) => now - e.t < TPM_WINDOW);
-  s.dayTimes = s.dayTimes.filter((t) => now - t < RPD_WINDOW);
-}
-
-// avalia se uma chamada pode rodar já; senão, retorna a menor espera (ms) e o motivo
-function canRunGemini(model, tokens, now) {
-  const lim = getLimits(model);
-  const s = stateFor(model);
-  pruneState(s, now);
-  let waitMs = 0, reason = '';
-  const consider = (w, why) => { if (w > waitMs) { waitMs = w; reason = why; } };
-
-  if (lim.rpm != null && s.reqTimes.length >= lim.rpm) {
-    consider(RPM_WINDOW - (now - s.reqTimes[0]), t('main.reason.rpm'));
-  }
-  if (lim.rpd != null && s.dayTimes.length >= lim.rpd) {
-    consider(RPD_WINDOW - (now - s.dayTimes[0]), t('main.reason.rpd'));
-  }
-  if (lim.tpm != null) {
-    const used = s.tokenEvents.reduce((a, e) => a + e.tokens, 0);
-    if (used + tokens > lim.tpm && s.tokenEvents.length) {
-      consider(TPM_WINDOW - (now - s.tokenEvents[0].t), t('main.reason.tpm'));
-    }
-  }
-  return waitMs <= 0 ? { ok: true } : { ok: false, waitMs, reason };
-}
-
-function pumpGeminiQueue() {
-  const now = Date.now();
-  const blocked = new Set(); // modelos já bloqueados nesta passada (preserva ordem por modelo)
-  let minWait = Infinity;
-  let granted = false;
-
-  let i = 0;
-  while (i < geminiWaitQueue.length) {
-    const item = geminiWaitQueue[i];
-    if (blocked.has(item.model)) { i++; continue; }
-    const res = canRunGemini(item.model, item.tokens, now);
-    if (res.ok) {
-      const s = stateFor(item.model);
-      s.reqTimes.push(now);
-      s.dayTimes.push(now);
-      s.tokenEvents.push({ t: now, tokens: item.tokens });
-      geminiWaitQueue.splice(i, 1);
-      item.resolve();
-      granted = true;
-    } else {
-      blocked.add(item.model);
-      if (res.waitMs < minWait) minWait = res.waitMs;
-      if (item.onWait) item.onWait(Math.max(1, Math.ceil(res.waitMs / 1000)), res.reason);
-      i++;
-    }
-  }
-
-  if (granted) persistGeminiUsage(); // grava o uso diário (RPD) para sobreviver a reinícios
-
-  if (geminiWaitQueue.length) {
-    clearTimeout(geminiPumpTimer);
-    const delay = Math.max(50, Math.min(minWait + 50, 30000));
-    geminiPumpTimer = setTimeout(pumpGeminiQueue, delay);
-  }
-}
-
-function acquireGeminiSlot(model, tokens, onWait) {
-  return new Promise((resolve) => {
-    geminiWaitQueue.push({ model, tokens, resolve, onWait });
-    pumpGeminiQueue();
-  });
-}
-
-// Persistência do uso diário (RPD) no config.json, para sobreviver a reinícios.
-// Só os timestamps dentro da janela de 24h importam; o resto é descartado.
-function loadGeminiUsage() {
-  const cfg = readConfig();
-  const usage = cfg.geminiUsage || {};
-  const now = Date.now();
-  for (const model of Object.keys(usage)) {
-    const arr = (Array.isArray(usage[model]) ? usage[model] : [])
-      .filter((t) => typeof t === 'number' && now - t < RPD_WINDOW);
-    stateFor(model).dayTimes = arr;
-  }
-}
-
-function persistGeminiUsage() {
-  const now = Date.now();
-  const usage = {};
-  for (const [model, s] of geminiState) {
-    const recent = s.dayTimes.filter((t) => now - t < RPD_WINDOW);
-    if (recent.length) usage[model] = recent;
-  }
-  try {
-    const cfg = readConfig();
-    cfg.geminiUsage = usage;
-    writeConfig(cfg);
-  } catch { /* best-effort */ }
-}
-
-// estimativa grosseira de tokens (entrada ~ chars/4 + orçamento de saída)
-function estimateTokens(prompt) {
-  return Math.ceil((prompt ? prompt.length : 0) / 4) + 1200;
-}
-
-// ---------- Gemini: helper de chamada única (JSON estruturado) ----------
-// onWait(segundos, motivo) é chamado caso a requisição precise aguardar o limite.
-async function callGemini(cfg, prompt, schema, onWait) {
-  const model = cfg.model || 'gemini-2.5-flash';
-  await acquireGeminiSlot(model, estimateTokens(prompt), onWait);
-
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(cfg.apiKey)}`;
-
-  const body = {
-    contents: [{ role: 'user', parts: [{ text: prompt }] }],
-    generationConfig: {
-      temperature: 0.2,
-      responseMimeType: 'application/json',
-      responseSchema: schema
-    }
-  };
-
-  const resp = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body)
-  });
-
-  if (!resp.ok) {
-    const errText = await resp.text();
-    let msg = t('main.apiError', { status: resp.status });
-    try {
-      const j = JSON.parse(errText);
-      if (j.error && j.error.message) msg = `Gemini: ${j.error.message}`;
-    } catch { /* mantém msg padrão */ }
-    throw new Error(msg);
-  }
-
-  const data = await resp.json();
-  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!text) throw new Error(t('main.apiNoContent'));
-  try {
-    return JSON.parse(text);
-  } catch {
-    throw new Error(t('main.apiParseFail'));
-  }
-}
-
-// Schema do JSON final de metadados ID3 (usado pela 2ª chamada e pelo formulário).
-const ID3_SCHEMA = {
-  type: 'object',
-  properties: {
-    title: { type: 'string' },
-    artist: { type: 'string' },
-    album: { type: 'string' },
-    albumArtist: { type: 'string' },
-    year: { type: 'string' },
-    genre: { type: 'string' },
-    trackNumber: { type: 'string' },
-    partOfSet: { type: 'string' },
-    composer: { type: 'string' },
-    publisher: { type: 'string' },
-    comment: { type: 'string' },
-    lyrics: { type: 'string' }
-  },
-  required: ['title', 'artist', 'album']
-};
 
 // ---------- IPC: pipeline inteligente (fontes factuais + 2 chamadas ao Gemini) ----------
 // 0) FONTES FACTUAIS: MusicBrainz + iTunes a partir de uma semente artista/título.
@@ -1046,11 +545,34 @@ const ID3_SCHEMA = {
 //    identifica a faixa e preenche o que falta (sem contradizer fatos de alta confiança).
 // 2) CONSISTÊNCIA + NORMALIZAÇÃO: cruza os fatos com a análise e entrega o ID3 final.
 // Continua limitado a 2 requisições ao Gemini/música (rate-limited).
+// Monta os metadados ID3 só com os FATOS (MusicBrainz/iTunes) — sem IA.
+// Usado no modo factual (sem chave Gemini): qualidade vem das fontes factuais;
+// a IA só preencheria lacunas/normalizaria títulos sujos.
+function factualMetadata(facts, seedArtist, seedTitle, raw) {
+  facts = facts || {};
+  raw = raw || {};
+  return {
+    title: facts.title || seedTitle || raw.title || '',
+    artist: facts.artist || seedArtist || raw.artist || '',
+    album: facts.album || raw.album || '',
+    albumArtist: facts.artist || seedArtist || '',
+    year: facts.year || '',
+    genre: facts.genre || '',
+    trackNumber: facts.trackNumber || '',
+    partOfSet: '',
+    composer: '',
+    publisher: '',
+    comment: '',
+    lyrics: ''
+  };
+}
+
+// IA ligada? Precisa de chave E não ter sido desativada explicitamente (useAi=false).
+// Sem chave → modo factual automático (o app funciona p/ qualquer um, sem config).
+function aiEnabled(cfg) { return cfg.useAi !== false && !!cfg.apiKey; }
+
 ipcMain.handle('gemini:smartMetadata', async (_e, payload) => {
   const cfg = readConfig();
-  if (!cfg.apiKey) {
-    return { error: t('main.configureKey') };
-  }
 
   const ctx = (payload && payload.ytContext) || {};
   const raw = (payload && payload.raw) || {};
@@ -1082,6 +604,21 @@ ipcMain.handle('gemini:smartMetadata', async (_e, payload) => {
   let facts = {};
   try { facts = consolidateFacts(await gatherFacts(seedArtist, seedTitle)); } catch { facts = {}; }
   const factsTxt = factsBlock(facts);
+
+  // ---- MODO FACTUAL (sem IA): devolve os fatos direto + capa, pulando o Gemini ----
+  if (!aiEnabled(cfg)) {
+    let coverDataUrl = null;
+    if (facts && facts.confident) {
+      progress(t('main.fetchingCover'));
+      try { coverDataUrl = await fetchFactualCover(facts); } catch { /* sem capa factual */ }
+    }
+    return {
+      data: factualMetadata(facts, seedArtist, seedTitle, raw),
+      coverDataUrl,
+      sources: (facts && facts.sources) || [],
+      aiSkipped: true
+    };
+  }
 
   // Bloco com todo o contexto da página, reutilizado nas chamadas.
   const ctxBlock = [
@@ -1227,8 +764,20 @@ ipcMain.handle('gemini:smartMetadata', async (_e, payload) => {
 // ---------- IPC: buscar metadados via Gemini (chamada única — arquivos locais) ----------
 ipcMain.handle('gemini:fetchMetadata', async (_e, context) => {
   const cfg = readConfig();
-  if (!cfg.apiKey) {
-    return { error: t('main.configureKey') };
+  context = context || {};
+
+  // Modo factual (sem IA): semente a partir das tags atuais → MusicBrainz/iTunes.
+  if (!aiEnabled(cfg)) {
+    let seedArtist = (context.artist || '').trim();
+    let seedTitle = (context.title || '').trim();
+    if ((!seedArtist || !seedTitle) && context.fileName) {
+      const p = parseArtistTitle(String(context.fileName).replace(/\.mp3$/i, ''));
+      seedArtist = seedArtist || p.artist;
+      seedTitle = seedTitle || p.title;
+    }
+    let facts = {};
+    try { facts = consolidateFacts(await gatherFacts(seedArtist, seedTitle)); } catch { facts = {}; }
+    return { data: factualMetadata(facts, seedArtist, seedTitle, context), sources: (facts && facts.sources) || [], aiSkipped: true };
   }
 
   const prompt = [
@@ -1375,311 +924,6 @@ ipcMain.handle('mp3:saveTags', async (_e, payload) => {
   }
 });
 
-// ====================================================================
-// MusicBrainz + Cover Art Archive (fonte factual de metadados e capa)
-// ====================================================================
-// User-Agent exigido pelo MusicBrainz (app/versão + contato).
-const MB_UA = 'Syntune/1.0 ( syntune app; marcoxpg2@gmail.com )';
-
-// Serializa as chamadas ao MusicBrainz garantindo >= 1100ms entre elas (a API
-// pede no máx. ~1 req/s). Chamadas concorrentes entram na fila.
-let mbChain = Promise.resolve();
-let mbLast = 0;
-function mbThrottle() {
-  const result = mbChain.then(async () => {
-    const wait = Math.max(0, 1100 - (Date.now() - mbLast));
-    if (wait) await new Promise((r) => setTimeout(r, wait));
-    mbLast = Date.now();
-  });
-  mbChain = result.catch(() => {});
-  return result;
-}
-
-// remove caracteres especiais do Lucene p/ montar a query com segurança
-function luceneSafe(s) {
-  return String(s || '').replace(/[+\-&|!(){}\[\]^"~*?:\\/]/g, ' ').replace(/\s+/g, ' ').trim();
-}
-
-async function mbFetch(query) {
-  const url = `https://musicbrainz.org/ws/2/recording?query=${encodeURIComponent(query)}&fmt=json&limit=8`;
-  await mbThrottle();
-  const r = await fetch(url, { headers: { 'User-Agent': MB_UA, Accept: 'application/json' } });
-  if (!r.ok) throw new Error(t('main.mbUnavailable', { status: r.status }));
-  return r.json();
-}
-
-// Faz duas buscas e mescla: uma REFINADA (só álbum oficial de estúdio — melhor para
-// faixas muito regravadas/ao vivo) e a SIMPLES (melhor para faixas diretas). O
-// ranking por qualidade+ano em mbToMatches escolhe o melhor do conjunto unido.
-async function mbSearchRecordings(artist, title) {
-  const parts = [];
-  if (title) parts.push(`recording:"${luceneSafe(title)}"`);
-  if (artist) parts.push(`artist:"${luceneSafe(artist)}"`);
-  const base = parts.join(' AND ') || luceneSafe(title) || luceneSafe(artist);
-  const refined = base + ' AND primarytype:album AND status:official AND -secondarytype:compilation AND -secondarytype:live';
-
-  const results = [];
-  for (const q of [refined, base]) {
-    try { results.push(await mbFetch(q)); } catch (e) { if (!results.length) throw e; }
-  }
-  const recs = [];
-  const seen = new Set();
-  for (const data of results) {
-    for (const rec of (Array.isArray(data.recordings) ? data.recordings : [])) {
-      if (rec && rec.id && !seen.has(rec.id)) { seen.add(rec.id); recs.push(rec); }
-    }
-  }
-  return { recordings: recs };
-}
-
-// de um "recording", escolhe a melhor release: prefere álbum de ESTÚDIO oficial
-// (penaliza coletânea/ao vivo/trilha) e, em empate, a data mais antiga.
-function bestReleaseOf(rec) {
-  const rels = Array.isArray(rec.releases) ? rec.releases : [];
-  const scored = rels.map((rel) => {
-    const rg = rel['release-group'] || {};
-    const primaryType = (rg['primary-type'] || '').toLowerCase();
-    const status = (rel.status || '').toLowerCase();
-    const secs = (rg['secondary-types'] || []).map((x) => String(x).toLowerCase());
-    let s = 0;
-    if (primaryType === 'album') s += 3;
-    if (status === 'official') s += 2;
-    if (secs.includes('compilation')) s -= 3;
-    if (secs.includes('live')) s -= 3;
-    if (secs.includes('soundtrack') || secs.includes('dj-mix')) s -= 1;
-    if (primaryType === 'album' && !secs.length) s += 2; // álbum de estúdio puro
-    let trackNumber = '', totalTracks = '';
-    const media = Array.isArray(rel.media) ? rel.media[0] : null;
-    if (media) {
-      totalTracks = media['track-count'] ? String(media['track-count']) : '';
-      const tr = Array.isArray(media.track) ? media.track[0] : null;
-      if (tr && tr.number) trackNumber = String(tr.number);
-    }
-    return { rel, s, trackNumber, totalTracks };
-  });
-  scored.sort((a, b) => b.s - a.s ||
-    String(a.rel.date || '9999').localeCompare(String(b.rel.date || '9999')));
-  return scored[0] || null;
-}
-
-function mbCreditToName(credit) {
-  if (!Array.isArray(credit)) return '';
-  return credit.map((c) => (c.name || (c.artist && c.artist.name) || '') + (c.joinphrase || '')).join('').trim();
-}
-
-function mbToMatches(data) {
-  const recs = Array.isArray(data.recordings) ? data.recordings : [];
-  const out = [];
-  for (const rec of recs.slice(0, 8)) {
-    const best = bestReleaseOf(rec);
-    const rel = best ? best.rel : null;
-    out.push({
-      title: rec.title || '',
-      artist: mbCreditToName(rec['artist-credit']),
-      album: rel ? (rel.title || '') : '',
-      year: rel && rel.date ? String(rel.date).slice(0, 4) : '',
-      trackNumber: best ? best.trackNumber : '',
-      totalTracks: best ? best.totalTracks : '',
-      releaseMbid: rel ? rel.id : '',
-      score: Number(rec.score) || 0,
-      _q: best ? best.s : -99
-    });
-  }
-  // ordena por qualidade da release (estúdio oficial primeiro), depois ano mais
-  // antigo (lançamento original) e, por fim, o score textual do MusicBrainz.
-  out.sort((a, b) => (b._q - a._q) ||
-    (Number(a.year || 9999) - Number(b.year || 9999)) || (b.score - a.score));
-
-  const seen = new Set();
-  const deduped = out.filter((m) => {
-    const k = `${m.title}|${m.artist}|${m.album}|${m.year}`.toLowerCase();
-    if (seen.has(k)) return false;
-    seen.add(k);
-    return true;
-  });
-  deduped.forEach((m) => { delete m._q; });
-  return deduped.slice(0, 6);
-}
-
-// ---------- iTunes Search API (gênero, ano, faixa e capa em alta) ----------
-function normName(s) {
-  return (s || '').toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu, '')
-    .replace(/[^a-z0-9]+/g, ' ').trim();
-}
-// match aproximado: igual ou um contém o outro (ignora acentos/pontuação)
-function fuzzyMatch(a, b) {
-  a = normName(a); b = normName(b);
-  if (!a || !b) return false;
-  return a === b || a.includes(b) || b.includes(a);
-}
-
-async function itunesLookup(artist, title) {
-  const term = encodeURIComponent(`${artist || ''} ${title || ''}`.trim());
-  if (!term) return null;
-  const url = `https://itunes.apple.com/search?term=${term}&media=music&entity=song&limit=5`;
-  const r = await fetch(url, { headers: { 'User-Agent': MB_UA } });
-  if (!r.ok) return null;
-  const data = await r.json();
-  const results = Array.isArray(data.results) ? data.results : [];
-  if (!results.length) return null;
-  // prefere o que casa artista E título; senão, o primeiro
-  const best = results.find((x) => fuzzyMatch(x.artistName, artist) && fuzzyMatch(x.trackName, title))
-    || results[0];
-  const artwork = (best.artworkUrl100 || best.artworkUrl60 || '').replace(/\/\d+x\d+bb\./, '/600x600bb.');
-  return {
-    artist: best.artistName || '',
-    title: best.trackName || '',
-    album: best.collectionName || '',
-    year: best.releaseDate ? String(best.releaseDate).slice(0, 4) : '',
-    genre: best.primaryGenreName || '',
-    trackNumber: best.trackNumber ? String(best.trackNumber) : '',
-    totalTracks: best.trackCount ? String(best.trackCount) : '',
-    artworkUrl: artwork
-  };
-}
-
-// Consulta as fontes factuais (MusicBrainz + iTunes) a partir de uma semente
-// artista/título. Cada fonte traz um flag de confiança (casou artista e título).
-async function gatherFacts(seedArtist, seedTitle) {
-  const facts = { sources: [] };
-  if (!seedArtist && !seedTitle) return facts;
-
-  try {
-    const matches = mbToMatches(await mbSearchRecordings(seedArtist, seedTitle));
-    const top = matches[0];
-    if (top) {
-      top.confident = fuzzyMatch(top.artist, seedArtist) && fuzzyMatch(top.title, seedTitle);
-      facts.musicbrainz = top;
-      facts.sources.push('MusicBrainz');
-    }
-  } catch { /* segue sem MB */ }
-
-  try {
-    const it = await itunesLookup(seedArtist, seedTitle);
-    if (it) {
-      it.confident = fuzzyMatch(it.artist, seedArtist) && fuzzyMatch(it.title, seedTitle);
-      facts.itunes = it;
-      facts.sources.push('iTunes');
-    }
-  } catch { /* segue sem iTunes */ }
-
-  return facts;
-}
-
-// Consolida os fatos: álbum/ano/faixa preferem MusicBrainz; gênero vem do iTunes.
-// Marca confiança alta se ao menos uma fonte casou artista+título.
-function consolidateFacts(facts) {
-  const mb = facts.musicbrainz, it = facts.itunes;
-  const mbC = mb && mb.confident, itC = it && it.confident;
-  const first = (...vals) => vals.find((v) => v) || '';
-  // ano: prefere o MAIS ANTIGO entre as fontes confiáveis (lançamento original,
-  // não uma reedição). Cai para qualquer ano disponível se nenhuma for confiável.
-  const confYears = [mbC && mb.year, itC && it.year].filter(Boolean).map(Number).filter((y) => y > 1000);
-  const year = confYears.length ? String(Math.min(...confYears)) : first(mb && mb.year, it && it.year);
-  return {
-    artist: first(mbC && mb.artist, itC && it.artist, mb && mb.artist, it && it.artist),
-    title: first(mbC && mb.title, itC && it.title, mb && mb.title, it && it.title),
-    album: first(mbC && mb.album, itC && it.album, mb && mb.album, it && it.album),
-    year,
-    trackNumber: first(mbC && mb.trackNumber, itC && it.trackNumber, mb && mb.trackNumber, it && it.trackNumber),
-    genre: first(itC && it.genre, it && it.genre),
-    releaseMbid: mb ? (mb.releaseMbid || '') : '',
-    artworkUrl: it ? (it.artworkUrl || '') : '',
-    confident: !!(mbC || itC),
-    sources: facts.sources
-  };
-}
-
-// Capa em alta: tenta o Cover Art Archive (por MBID) e depois o artwork do iTunes.
-async function fetchFactualCover(c) {
-  if (!c) return null;
-  const tryUrl = async (url) => {
-    try {
-      const r = await fetch(url, { headers: { 'User-Agent': MB_UA }, redirect: 'follow' });
-      if (!r.ok) return null;
-      const buf = Buffer.from(await r.arrayBuffer());
-      const ct = (r.headers.get('content-type') || 'image/jpeg').split(';')[0];
-      if (!ct.startsWith('image/')) return null;
-      return `data:${ct};base64,${buf.toString('base64')}`;
-    } catch { return null; }
-  };
-  if (c.releaseMbid) {
-    const caa = await tryUrl(`https://coverartarchive.org/release/${encodeURIComponent(c.releaseMbid)}/front-500`);
-    if (caa) return caa;
-  }
-  if (c.artworkUrl) {
-    const it = await tryUrl(c.artworkUrl);
-    if (it) return it;
-  }
-  return null;
-}
-
-// extrai "Artista - Título" de um título de vídeo/arquivo (heurística)
-function parseArtistTitle(s) {
-  const t = (s || '').replace(/\([^)]*\)|\[[^\]]*\]/g, ' ').replace(/\s+/g, ' ').trim();
-  const parts = t.split(/\s[-–—]\s/);
-  if (parts.length >= 2) return { artist: parts[0].trim(), title: parts.slice(1).join(' - ').trim() };
-  return { artist: '', title: t };
-}
-
-// monta o bloco de fatos p/ os prompts do Gemini
-function factsBlock(c) {
-  if (!c || (!c.album && !c.year && !c.genre && !c.trackNumber && !c.artist && !c.title)) {
-    return '(nenhum dado factual encontrado nas APIs de música)';
-  }
-  return [
-    `- Fontes consultadas: ${(c.sources || []).join(', ') || '(nenhuma)'}`,
-    `- Confiança do match: ${c.confident ? 'ALTA' : 'baixa'}`,
-    `- Artista: ${c.artist || '(?)'}`,
-    `- Título: ${c.title || '(?)'}`,
-    `- Álbum: ${c.album || '(?)'}`,
-    `- Ano de lançamento: ${c.year || '(?)'}`,
-    `- Número da faixa: ${c.trackNumber || '(?)'}`,
-    `- Gênero (iTunes): ${c.genre || '(?)'}`
-  ].join('\n');
-}
-
-// ---------- LRCLIB: letra sincronizada (LRC) — grátis, sem chave ----------
-const LRCLIB_UA = 'Syntune/1.0.0 ( https://github.com/  marcoxpg2@gmail.com )';
-
-async function lrclibGet(artist, title, album, duration) {
-  const p = new URLSearchParams({
-    artist_name: artist || '', track_name: title || '',
-    album_name: album || '', duration: String(Math.round(duration || 0))
-  });
-  const r = await fetch(`https://lrclib.net/api/get?${p.toString()}`, { headers: { 'User-Agent': LRCLIB_UA } });
-  if (!r.ok) return null;
-  return r.json();
-}
-async function lrclibSearch(artist, title) {
-  const p = new URLSearchParams({ track_name: title || '', artist_name: artist || '' });
-  const r = await fetch(`https://lrclib.net/api/search?${p.toString()}`, { headers: { 'User-Agent': LRCLIB_UA } });
-  if (!r.ok) return [];
-  const data = await r.json();
-  return Array.isArray(data) ? data : [];
-}
-
-// detecta tags de tempo [mm:ss.xx] de uma letra sincronizada (LRC)
-function isSyncedLyricsText(text) {
-  return !!(text && /\[\d{1,2}:\d{1,2}(?:[.:]\d{1,3})?\]/.test(text));
-}
-
-// busca no LRCLIB: tenta /get exato (com duração) e cai para /search
-async function fetchLrclib({ artist, title, album, duration } = {}) {
-  if (!title && !artist) return { synced: null, plain: null };
-  let hit = null;
-  if (duration && duration > 0) {
-    try { hit = await lrclibGet(artist, title, album, duration); } catch { /* tenta busca */ }
-  }
-  if (!hit || (!hit.syncedLyrics && !hit.plainLyrics)) {
-    try {
-      const results = await lrclibSearch(artist, title);
-      if (results.length) hit = results.find((x) => x.syncedLyrics) || results[0];
-    } catch { /* sem resultado */ }
-  }
-  if (!hit) return { synced: null, plain: null };
-  return { synced: hit.syncedLyrics || null, plain: hit.plainLyrics || null };
-}
 
 ipcMain.handle('lyrics:fetchSynced', async (_e, args = {}) => {
   try {
@@ -1710,270 +954,40 @@ ipcMain.handle('lyrics:enrichFile', async (_e, { filePath } = {}) => {
   }
 });
 
-// ---------- Genius: foto do artista (arquivos em userData/artists/) ----------
-// artists.json guarda só metadados (url remota, nome do arquivo local, tried);
-// os bytes da foto ficam em disco e são servidos via protocolo mp3artist://,
-// sem nunca carregar todas as fotos na memória.
-const ARTISTS_PATH = () => path.join(app.getPath('userData'), 'artists.json');
-const ARTISTS_DIR = () => path.join(app.getPath('userData'), 'artists');
-function readArtistsCache() {
-  try { return JSON.parse(fs.readFileSync(ARTISTS_PATH(), 'utf-8')) || {}; } catch { return {}; }
-}
-function writeArtistsCache(c) {
-  try { fs.writeFileSync(ARTISTS_PATH(), JSON.stringify(c, null, 2), 'utf-8'); } catch { /* best-effort */ }
-}
+// ---------- IPC: foto do artista (Genius) → src/services/artist-image.js (🟦 SERVICE) ----------
+ipcMain.handle('artist:image', (_e, { name } = {}) =>
+  resolveArtistImage({ name, token: readConfig().geniusToken, noArtistLabel: t('library.noArtist') }));
 
-// nome de arquivo seguro a partir da chave normalizada do artista
-function artistFileName(key, mime) {
-  const base = key.replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'artist';
-  return base + (mime === 'image/png' ? '.png' : '.jpg');
-}
+// Last.fm (assinatura MD5, auth web-flow, scrobble, playcount, artist info)
+// → src/services/lastfm.js (🟦 SERVICE). Handlers só leem cfg e injetam as chaves.
+ipcMain.handle('lastfm:authSession', (_e, { apiKey, secret }) => lastfm.authSession({ apiKey, secret }));
 
-// grava os bytes da foto em disco e devolve a URL do protocolo
-function saveArtistPhoto(key, buf, mime, at) {
-  const dir = ARTISTS_DIR();
-  fs.mkdirSync(dir, { recursive: true });
-  const file = artistFileName(key, mime);
-  fs.writeFileSync(path.join(dir, file), buf);
-  return { file, url: `mp3artist://${encodeURIComponent(file)}?v=${at}` };
-}
-
-// serializa as chamadas ao Genius (~400ms entre elas)
-let geniusChain = Promise.resolve();
-let geniusLast = 0;
-function geniusThrottle() {
-  const result = geniusChain.then(async () => {
-    const wait = Math.max(0, 400 - (Date.now() - geniusLast));
-    if (wait) await new Promise((r) => setTimeout(r, wait));
-    geniusLast = Date.now();
-  });
-  geniusChain = result.catch(() => {});
-  return result;
-}
-
-// busca a URL da foto do artista no Genius (casa o nome; senão, 1º resultado)
-async function geniusArtistImage(name, token) {
-  const url = `https://api.genius.com/search?q=${encodeURIComponent(name)}`;
-  await geniusThrottle();
-  const r = await fetch(url, { headers: { Authorization: `Bearer ${token}`, 'User-Agent': MB_UA } });
-  if (!r.ok) return null;
-  const data = await r.json();
-  const hits = (data && data.response && data.response.hits) || [];
-  const pickImg = (a) => (a && (a.image_url || a.header_image_url)) || null;
-  for (const h of hits) {
-    const a = h.result && h.result.primary_artist;
-    if (a && fuzzyMatch(a.name, name) && pickImg(a)) return pickImg(a);
-  }
-  const a0 = hits[0] && hits[0].result && hits[0].result.primary_artist;
-  return pickImg(a0);
-}
-
-// retorna a URL (mp3artist://) da foto do artista; null se não houver token/imagem
-ipcMain.handle('artist:image', async (_e, { name } = {}) => {
-  const key = normName(name);
-  // placeholders de "artista desconhecido" em qualquer idioma da UI não vão ao Genius
-  const skip = new Set(['sem artista', 'desconhecido', 'no artist', 'unknown', normName(t('library.noArtist'))]);
-  if (!key || skip.has(key)) return { url: null };
-
-  const cache = readArtistsCache();
-  const hit = cache[key];
-
-  // migração do formato legado: dataUrl embutida no JSON -> arquivo em disco
-  if (hit && hit.dataUrl) {
-    try {
-      const m = /^data:([^;]+);base64,(.*)$/s.exec(hit.dataUrl);
-      if (m) {
-        const saved = saveArtistPhoto(key, Buffer.from(m[2], 'base64'), m[1], hit.at || Date.now());
-        cache[key] = { name: hit.name || name, url: hit.url || null, file: saved.file, tried: true, at: hit.at || Date.now() };
-        writeArtistsCache(cache);
-        return { url: saved.url, cached: true };
-      }
-    } catch { /* migração falhou: rebusca abaixo */ }
-    delete hit.dataUrl;
-  }
-
-  if (hit && hit.file && fs.existsSync(path.join(ARTISTS_DIR(), hit.file))) {
-    return { url: `mp3artist://${encodeURIComponent(hit.file)}?v=${hit.at || 0}`, cached: true };
-  }
-  if (hit && hit.tried && !hit.url) return { url: null }; // já tentou e não achou
-
-  const token = (readConfig().geniusToken || '').trim();
-  if (!token) return { url: null, noToken: true };
-
-  try {
-    let imgUrl = hit && hit.url;
-    if (!imgUrl) imgUrl = await geniusArtistImage(name, token);
-    if (!imgUrl) {
-      cache[key] = { name, url: null, tried: true, at: Date.now() };
-      writeArtistsCache(cache);
-      return { url: null };
-    }
-    const ir = await fetch(imgUrl, { headers: { 'User-Agent': MB_UA } });
-    if (!ir.ok) return { url: null };
-    const ct = (ir.headers.get('content-type') || 'image/jpeg').split(';')[0];
-    if (!ct.startsWith('image/')) return { url: null };
-    const buf = Buffer.from(await ir.arrayBuffer());
-    const at = Date.now();
-    const saved = saveArtistPhoto(key, buf, ct, at);
-    cache[key] = { name, url: imgUrl, file: saved.file, tried: true, at };
-    writeArtistsCache(cache);
-    return { url: saved.url };
-  } catch (err) {
-    return { url: null, error: err.message };
-  }
-});
-
-const crypto = require('crypto');
-
-// Assinatura exigida pelo protocolo da API do Last.fm: api_sig = MD5 dos
-// parâmetros ordenados + secret (https://www.last.fm/api/authspec).
-// O MD5 aqui é imposição do serviço — trocar o algoritmo quebra a autenticação.
-// (Alerta CodeQL js/weak-cryptographic-algorithm dispensado como won't fix.)
-function lastfmSign(params, secret) {
-  const keys = Object.keys(params).filter(k => k !== 'format' && k !== 'callback').sort();
-  let str = '';
-  for (const k of keys) {
-    str += k + params[k];
-  }
-  str += secret;
-  return crypto.createHash('md5').update(str, 'utf8').digest('hex');
-}
-
-ipcMain.handle('lastfm:authSession', async (_e, { apiKey, secret }) => {
-  try {
-    const resToken = await fetch(`https://ws.audioscrobbler.com/2.0/?method=auth.getToken&api_key=${encodeURIComponent(apiKey)}&format=json`);
-    const dataToken = await resToken.json();
-    if (!dataToken.token) return { error: dataToken.message || t('main.lastfmTokenFail') };
-
-    const token = dataToken.token;
-    shell.openExternal(`https://www.last.fm/api/auth/?api_key=${encodeURIComponent(apiKey)}&token=${encodeURIComponent(token)}`);
-
-    for (let i = 0; i < 45; i++) {
-      await new Promise(r => setTimeout(r, 2000));
-      const sig = lastfmSign({ api_key: apiKey, method: 'auth.getSession', token }, secret);
-      const resSess = await fetch(`https://ws.audioscrobbler.com/2.0/?method=auth.getSession&api_key=${encodeURIComponent(apiKey)}&token=${encodeURIComponent(token)}&api_sig=${encodeURIComponent(sig)}&format=json`);
-      const dataSess = await resSess.json();
-      if (dataSess.session) {
-        return { sessionKey: dataSess.session.key, username: dataSess.session.name };
-      }
-      if (dataSess.error && dataSess.error !== 14) {
-        return { error: dataSess.message || t('main.lastfmAuthError') };
-      }
-    }
-    return { error: t('main.lastfmAuthTimeout') };
-  } catch (err) {
-    return { error: err.message };
-  }
-});
-
-ipcMain.handle('lastfm:scrobble', async (_e, { artist, title, timestamp }) => {
+ipcMain.handle('lastfm:scrobble', (_e, { artist, title, timestamp }) => {
   const cfg = readConfig();
   if (!cfg.lastfmScrobbleEnabled || !cfg.lastfmSessionKey || !cfg.lastfmApiKey || !cfg.lastfmSecret) return { success: false };
-  try {
-    const params = {
-      method: 'track.scrobble',
-      api_key: cfg.lastfmApiKey.trim(),
-      sk: cfg.lastfmSessionKey.trim(),
-      'artist[0]': artist,
-      'track[0]': title,
-      'timestamp[0]': String(timestamp)
-    };
-    const sig = lastfmSign(params, cfg.lastfmSecret.trim());
-    params.api_sig = sig;
-    params.format = 'json';
-
-    const form = new URLSearchParams();
-    for (const k in params) form.append(k, params[k]);
-
-    const res = await fetch('https://ws.audioscrobbler.com/2.0/', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: form.toString()
-    });
-    const data = await res.json();
-    return { success: !data.error };
-  } catch {
-    return { success: false };
-  }
+  return lastfm.scrobble({
+    apiKey: cfg.lastfmApiKey, secret: cfg.lastfmSecret, sessionKey: cfg.lastfmSessionKey,
+    artist, title, timestamp
+  });
 });
 
-ipcMain.handle('lastfm:getPlaycount', async (_e, { artist, title } = {}) => {
-  if (!artist || !title) return null;
+ipcMain.handle('lastfm:getPlaycount', (_e, { artist, title } = {}) => {
   const cfg = readConfig();
-  const key = (cfg.lastfmApiKey || '').trim();
-  if (!key) return null;
-
-  try {
-    const url = `https://ws.audioscrobbler.com/2.0/?method=track.getInfo&api_key=${encodeURIComponent(key)}&artist=${encodeURIComponent(artist)}&track=${encodeURIComponent(title)}&format=json&autocorrect=1`;
-    const res = await fetch(url, { headers: { 'User-Agent': 'Syntune/1.0' } });
-    if (!res.ok) return null;
-    const data = await res.json();
-    if (data && data.track) {
-      const playcount = data.track.playcount || '0';
-      const listeners = data.track.listeners || '0';
-      const tags = (data.track.toptags && Array.isArray(data.track.toptags.tag))
-        ? data.track.toptags.tag.slice(0, 5).map(t => t.name)
-        : [];
-      return { playcount, listeners, tags };
-    }
-  } catch (err) {
-    console.error('Erro Last.fm API:', err.message);
-  }
-  return null;
+  return lastfm.getPlaycount({ apiKey: cfg.lastfmApiKey, artist, title });
 });
 
-ipcMain.handle('lastfm:getArtistInfo', async (_e, { artist } = {}) => {
-  if (!artist) return null;
+ipcMain.handle('lastfm:getArtistInfo', (_e, { artist } = {}) => {
   const cfg = readConfig();
-  const key = (cfg.lastfmApiKey || '').trim();
-  if (!key) return null;
-
-  try {
-    const url = `https://ws.audioscrobbler.com/2.0/?method=artist.getInfo&api_key=${encodeURIComponent(key)}&artist=${encodeURIComponent(artist)}&format=json&autocorrect=1&lang=${encodeURIComponent(i18n.getLanguage().split('-')[0])}`;
-    const res = await fetch(url, { headers: { 'User-Agent': 'Syntune/1.0' } });
-    if (!res.ok) return null;
-    const data = await res.json();
-    if (data && data.artist) {
-      const bio = data.artist.bio && data.artist.bio.summary ? data.artist.bio.summary : '';
-      const playcount = data.artist.stats ? data.artist.stats.playcount : '0';
-      const listeners = data.artist.stats ? data.artist.stats.listeners : '0';
-      const tags = (data.artist.tags && Array.isArray(data.artist.tags.tag))
-        ? data.artist.tags.tag.slice(0, 5).map(t => t.name)
-        : [];
-      return { bio, playcount, listeners, tags };
-    }
-  } catch (err) {
-    console.error('Erro Last.fm Artist API:', err.message);
-  }
-  return null;
+  return lastfm.getArtistInfo({ apiKey: cfg.lastfmApiKey, artist });
 });
 
-async function solveLrclibChallenge() {
-  try {
-    const res = await fetch('https://lrclib.net/api/request-challenge', { method: 'POST' });
-    const data = await res.json();
-    const prefix = data.prefix;
-    const target = data.target.toLowerCase();
-    let nonce = 0;
-    while (nonce < 20000000) {
-      const hash = crypto.createHash('sha256').update(prefix + String(nonce)).digest('hex');
-      if (hash <= target) {
-        return prefix + ':' + nonce;
-      }
-      nonce++;
-    }
-  } catch (err) {
-    console.error('LRCLIB Challenge Error:', err);
-  }
-  return null;
-}
 
 ipcMain.handle('lyrics:publish', async (_e, payload) => {
   const { trackName, artistName, albumName, duration, plainLyrics, syncedLyrics, filePath } = payload;
-  if (!trackName || !artistName || !duration) return { error: 'Campos obrigatórios ausentes' };
+  if (!trackName || !artistName || !duration) return { error: t('lyrics.publish.missingFields') };
 
   const token = await solveLrclibChallenge();
-  if (!token) return { error: 'Falha ao gerar o token de contribuição (PoW).' };
+  if (!token) return { error: t('lyrics.publish.tokenFail') };
 
   const body = {
     trackName,
@@ -2001,7 +1015,7 @@ ipcMain.handle('lyrics:publish', async (_e, payload) => {
       }
       return { success: true };
     } else {
-      let msg = 'Erro na API LRCLIB';
+      let msg = t('lyrics.publish.apiError');
       try { const r = await res.json(); msg = r.message || r.error || msg; } catch {}
       return { error: msg };
     }
@@ -2021,288 +1035,10 @@ function send(channel, payload) {
   }
 }
 
-// ---------- Detecção de dispositivos removíveis (polling via PowerShell/CIM) ----------
-// Junta Win32_DiskDrive (USB/removível) → partição → disco lógico, retornando, por
-// volume: serial de hardware do disco, serial do volume (fallback), letra, rótulo e tamanhos.
-const PS_DRIVE_QUERY = `
-$ErrorActionPreference='SilentlyContinue'
-$out=@()
-$lds = Get-WmiObject Win32_LogicalDisk -Filter "DriveType=2"
-if (-not $lds) { Write-Output '[]'; exit }
-$disks = @{}
-Get-WmiObject Win32_DiskDrive -Filter "InterfaceType='USB'" | ForEach-Object {
-  $d=$_
-  $d.GetRelated('Win32_DiskPartition') | ForEach-Object {
-    $p=$_
-    $p.GetRelated('Win32_LogicalDisk') | ForEach-Object {
-      $disks[$_.DeviceID] = @{ serial=($d.SerialNumber -as [string]); model=$d.Model }
-    }
-  }
-}
-$lds | ForEach-Object {
-  $ld=$_
-  $disk=$disks[$ld.DeviceID]
-  $out += [pscustomobject]@{
-    serial=if($disk){$disk.serial}else{''};
-    model=if($disk){$disk.model}else{'Removivel'};
-    drive=$ld.DeviceID; label=$ld.VolumeName;
-    volSerial=$ld.VolumeSerialNumber; size=$ld.Size; free=$ld.FreeSpace
-  }
-}
-if ($out.Count -eq 0) { Write-Output '[]' } else { $out | ConvertTo-Json -Compress }
-`;
-
-function cleanSerial(s) {
-  return (s == null ? '' : String(s)).replace(/\s+/g, '').trim();
-}
-
-// monta o serial efetivo: hardware (estável) com fallback para o serial do volume
-function normalizeDrive(d) {
-  if (!d || !d.drive) return null;
-  const hw = cleanSerial(d.serial);
-  const vol = cleanSerial(d.volSerial);
-  let serial, usedVolumeFallback = false;
-  if (hw) serial = 'HW:' + hw;
-  else if (vol) { serial = 'VOL:' + vol; usedVolumeFallback = true; }
-  else return null;
-  return {
-    serial, usedVolumeFallback,
-    drive: String(d.drive),                 // ex.: "E:"
-    label: d.label || '',
-    model: d.model || '',
-    size: Number(d.size) || 0,
-    free: Number(d.free) || 0
-  };
-}
-
-function queryRemovableDrives() {
-  return new Promise((resolve) => {
-    const encoded = Buffer.from(PS_DRIVE_QUERY, 'utf16le').toString('base64');
-    let ps;
-    try {
-      ps = spawn('powershell.exe',
-        ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', encoded],
-        { windowsHide: true });
-    } catch { return resolve([]); }
-
-    let stdout = '';
-    let settled = false;
-
-    // Timeout de segurança: mata o PowerShell se demorar mais de 15 s
-    // (o Windows pode demorar ao inicializar drivers USB recém plugados)
-    const timer = setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      try { ps.kill(); } catch { /* já terminou */ }
-      consecutiveTimeouts++;
-      if (consecutiveTimeouts <= 2) {
-        console.warn('[queryRemovableDrives] timeout — PowerShell demorou demais, ignorando.');
-      }
-      resolve([]);
-    }, 15000);
-
-    ps.stdout.on('data', (d) => { stdout += d; });
-    ps.stderr.on('data', () => { /* ignora ruído */ });
-    ps.on('error', () => { if (!settled) { settled = true; clearTimeout(timer); resolve([]); } });
-    ps.on('close', () => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      consecutiveTimeouts = 0; // sucesso — zera o contador
-      const txt = stdout.trim();
-      if (!txt) return resolve([]);
-      let parsed;
-      try { parsed = JSON.parse(txt); } catch { return resolve([]); }
-      if (!parsed) return resolve([]);
-      const arr = Array.isArray(parsed) ? parsed : [parsed];
-      resolve(arr.map(normalizeDrive).filter(Boolean));
-    });
-  });
-}
-
-let consecutiveTimeouts = 0; // conta timeouts seguidos para back-off
-
-const connectedDevices = new Map(); // serial -> { drive, label, model, size, free, lastSeen }
-let devicePollTimer = null;
-let devicePolling = false;
-
-function startDevicePolling() {
-  if (process.platform !== 'win32') return; // detecção implementada só p/ Windows
-  const tick = async () => {
-    if (devicePolling) return; // evita sobreposição de execuções
-    devicePolling = true;
-    try {
-      const drives = await queryRemovableDrives();
-      reconcileDevices(drives);
-    } catch { /* segue na próxima passada */ } finally {
-      devicePolling = false;
-    }
-  };
-  tick();
-  // Intervalo de 8 s: dá tempo ao Windows finalizar a inicialização de drivers USB
-  // antes da próxima consulta CIM, evitando empilhamento de timeouts
-  devicePollTimer = setInterval(tick, 8000);
-}
-
-function reconcileDevices(drives) {
-  const now = Date.now();
-  const seen = new Map();
-  for (const d of drives) {
-    if (!seen.has(d.serial)) seen.set(d.serial, d); // dedupe por serial (vários volumes/disco)
-  }
-  // conexões novas
-  for (const [serial, d] of seen) {
-    const wasConnected = connectedDevices.has(serial);
-    connectedDevices.set(serial, { ...d, lastSeen: now });
-    if (!wasConnected) onDeviceAttached(d);
-  }
-  // desconexões
-  for (const serial of [...connectedDevices.keys()]) {
-    if (!seen.has(serial)) {
-      connectedDevices.delete(serial);
-      send('device:detached', { serial });
-    }
-  }
-}
-
-function onDeviceAttached(d) {
-  const cfg = readConfig();
-  cfg.devices = cfg.devices || {};
-  const entry = cfg.devices[d.serial] || {
-    serial: d.serial, nickname: '', syncEnabled: false, ignored: false, configured: false
-  };
-  entry.lastLabel = d.label;
-  entry.lastSeen = Date.now();
-  entry.usedVolumeFallback = d.usedVolumeFallback;
-  cfg.devices[d.serial] = entry;
-  writeConfig(cfg);
-
-  send('device:attached', {
-    serial: d.serial, drive: d.drive, label: d.label, model: d.model,
-    size: d.size, free: d.free,
-    nickname: entry.nickname, syncEnabled: !!entry.syncEnabled,
-    ignored: !!entry.ignored, configured: !!entry.configured,
-    usedVolumeFallback: !!entry.usedVolumeFallback
-  });
-}
-
-// ---------- Persistência do estado de sincronização (sync.json em userData) ----------
-const SYNC_PATH = () => path.join(app.getPath('userData'), 'sync.json');
-function readSyncState() {
-  try { return JSON.parse(fs.readFileSync(SYNC_PATH(), 'utf-8')) || {}; } catch { return {}; }
-}
-function writeSyncState(state) {
-  try { fs.writeFileSync(SYNC_PATH(), JSON.stringify(state, null, 2), 'utf-8'); } catch { /* best-effort */ }
-}
-
-// chave de identidade da faixa: nome + artista + ano (case/espaço-insensível)
-function normPart(s) { return (s == null ? '' : String(s)).toLowerCase().trim().replace(/\s+/g, ' '); }
-function syncKey(title, artist, year) {
-  return `${normPart(title)}|${normPart(artist)}|${(year == null ? '' : String(year)).trim()}`;
-}
-
-function deviceMusicDir(serial) {
-  const d = connectedDevices.get(serial);
-  if (!d) return null;
-  const root = d.drive.endsWith(':') ? d.drive + path.sep : d.drive;
-  return path.join(root, 'music');
-}
-
-// ---------- Thread de sincronização (worker) ----------
-// A varredura/cópia de arquivos roda num worker thread para não travar o
-// processo principal (UI/IPC/polling). O worker reporta progresso e resultado
-// por mensagens correlacionadas por id.
-let syncWorker = null;
-let syncTaskSeq = 0;
-const syncTasks = new Map(); // id -> { resolve, onProgress }
-
-function ensureSyncWorker() {
-  if (syncWorker) return syncWorker;
-  syncWorker = new Worker(path.join(__dirname, 'sync-worker.js'));
-  syncWorker.on('message', (m) => {
-    const t = syncTasks.get(m.id);
-    if (!t) return;
-    if (m.type === 'progress') {
-      if (t.onProgress) t.onProgress(m.payload || {});
-    } else {
-      syncTasks.delete(m.id);
-      t.resolve(m.type === 'error' ? { error: m.error } : m.result);
-    }
-  });
-  // falha geral do worker: resolve tudo que estava pendente e recria na próxima
-  syncWorker.on('error', (err) => {
-    for (const t of syncTasks.values()) t.resolve({ error: err.message });
-    syncTasks.clear();
-    syncWorker = null;
-  });
-  syncWorker.on('exit', () => { syncWorker = null; });
-  return syncWorker;
-}
-
-function runSyncTask(type, params, onProgress) {
-  return new Promise((resolve) => {
-    const w = ensureSyncWorker();
-    const id = ++syncTaskSeq;
-    syncTasks.set(id, { resolve, onProgress });
-    w.postMessage({ id, type, params });
-  });
-}
-
-// lê o escopo de sincronização configurado p/ o dispositivo
-function deviceScope(serial) {
-  const cfg = readConfig();
-  const e = (cfg.devices || {})[serial];
-  if (e && e.syncScope && e.syncScope.mode === 'artists') {
-    return { mode: 'artists', artists: Array.isArray(e.syncScope.artists) ? e.syncScope.artists : [] };
-  }
-  return { mode: 'all' };
-}
-
-// monta os parâmetros (caminhos) que o worker precisa para um dispositivo
-function deviceTaskParams(serial) {
-  const d = connectedDevices.get(serial);
-  if (!d) return null;
-  return {
-    serial,
-    musicDir: deviceMusicDir(serial),
-    libraryDir: getLibraryDir(),
-    syncPath: SYNC_PATH(),
-    free: d.free || 0,
-    scope: deviceScope(serial)
-  };
-}
-
-// ---------- Varredura (assíncrona, no worker) ----------
-async function scanDevice(serial, onProgress) {
-  const params = deviceTaskParams(serial);
-  if (!params) return { error: t('main.deviceNotConnected') };
-  return runSyncTask('scan', params, onProgress);
-}
-
-// ---------- Sincronização (assíncrona, no worker), serializada por dispositivo ----------
-const syncing = new Map(); // serial -> { rerun }
-async function syncDevice(serial, onProgress) {
-  const params = deviceTaskParams(serial);
-  if (!params) return { error: t('main.deviceNotConnected') };
-
-  // evita sincronizações concorrentes p/ o mesmo dispositivo; reexecuta se algo
-  // mudou (ex.: nova música) enquanto a anterior rodava.
-  if (syncing.has(serial)) { syncing.get(serial).rerun = true; return { queued: true }; }
-  const guard = { rerun: false };
-  syncing.set(serial, guard);
-  let result;
-  try {
-    do {
-      guard.rerun = false;
-      const p = deviceTaskParams(serial);
-      if (!p) { result = { error: t('main.deviceDisconnected') }; break; }
-      result = await runSyncTask('sync', p, onProgress);
-    } while (guard.rerun && connectedDevices.has(serial));
-  } finally {
-    syncing.delete(serial);
-  }
-  return result;
-}
+// ---------- Detecção + sincronização de dispositivos -> src/devices/{device-detection,sync-controller}.js (🟨 DEVICE) ----------
+const devices = createSyncController({ send, readConfig, writeConfig, getLibraryDir, readId3Fast });
+// destructure com MESMOS nomes -> handlers abaixo inalterados
+const { connectedDevices, deviceMusicDir, readSyncState, writeSyncState, syncKey, scanDevice, syncDevice, runSyncTask, SYNC_PATH } = devices;
 
 // ---------- IPC: dispositivos e sincronização ----------
 ipcMain.handle('devices:list', () => {
