@@ -13,7 +13,7 @@
   ![AI](https://img.shields.io/badge/Gemini-flash--lite-FFAA00)
   ![Open data](https://img.shields.io/badge/data-MusicBrainz%20%7C%20LRCLIB%20%7C%20Last.fm-brightgreen)
 
-  🌍 **English** · [Português (BR)](README.pt-BR.md)
+  🌍 **English** · [Português (BR)](README.pt-BR.md) · [Español](README.es.md) · [Français](README.fr.md) · [Deutsch](README.de.md) · [Русский](README.ru.md)
 
   <br>
 
