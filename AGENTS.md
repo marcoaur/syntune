@@ -12,7 +12,7 @@ Syntune = **organizador + player de música offline** que:
 - toca a biblioteca com **player imersivo** (espectro Web Audio, karaokê de letra sincronizada, equalizador);
 - **sincroniza** a biblioteca com **dispositivos portáteis removíveis** (pendrive / MP3 player) via worker thread.
 
-Diferencial: pipeline de metadados **factual-first** (a IA nunca inventa sozinha — ela concilia fatos de APIs musicais) + **letra sincronizada karaokê** com editor próprio + **segredos cifrados em repouso** (AES-256-GCM + cofre do SO).
+Diferencial: pipeline de metadados **factual-first** (a IA nunca inventa sozinha — ela concilia fatos de APIs musicais) + **modo factual** que torna a IA **opcional** (o app funciona sem chave Gemini, etiquetando só com as fontes factuais) + **letra sincronizada karaokê** com editor próprio + **segredos cifrados em repouso** (AES-256-GCM + cofre do SO).
 
 ## 2. Stack
 
@@ -100,6 +100,7 @@ scripts/             ⬜ UTIL   build, capture, check-i18n
 | Auto-update | `main.js` (`setupAutoUpdate`) | só NSIS |
 | Download YouTube (yt-dlp+ffmpeg) | `src/services/youtube.js` + handler `youtube:download` em `main.js` | binários sob demanda; máx 2 jobs |
 | **Pipeline inteligente de metadados** | `main.js` (`gemini:smartMetadata`) + `src/services/metadata-sources.js` + `src/services/gemini.js` | factual-first: fatos → análise IA → normalização IA |
+| **Modo factual (IA opcional)** | `main.js` (`aiEnabled`, `factualMetadata`, branch em `gemini:smartMetadata`/`gemini:fetchMetadata`) | sem chave OU `useAi=false` → metadados só de MusicBrainz/iTunes + capa, pulando o Gemini. Toggle "Usar IA" em Configurações (`useAi`) |
 | Fatos musicais (MusicBrainz/iTunes) | `src/services/metadata-sources.js` | throttle MB 1.1s, ranking estúdio-oficial |
 | Rate-limit + chamada Gemini | `src/services/gemini.js` | fila FIFO por modelo, RPD persistido |
 | ID3 read/write rápido | `src/media/id3.js` | fast path só do header ID3v2 |
@@ -117,7 +118,7 @@ scripts/             ⬜ UTIL   build, capture, check-i18n
 1. **Segredos nunca em plaintext** quando o cofre do SO existe. `SECRET_FIELDS` saem do `config.json` → `secrets.enc`. Migração de instalações antigas é obrigatória (`initSecrets`).
 2. **`window.api` é a única ponte** renderer↔main (`preload.js`). Renderer não acessa Node direto. Toda nova IPC: registrar handler em `main.js` **e** expor em `preload.js`.
 3. **Renderer sem handlers inline** — só `addEventListener`. Manter ids do `index.html` estáveis (são âncoras de wiring e de CSS id-scoped).
-4. **Pipeline factual-first**: a IA concilia fatos, não inventa. Não remover a etapa de `gatherFacts`/`consolidateFacts` antes do Gemini.
+4. **Pipeline factual-first**: a IA concilia fatos, não inventa. Não remover a etapa de `gatherFacts`/`consolidateFacts` antes do Gemini. A IA é **opcional** (`aiEnabled(cfg) = cfg.useAi !== false && !!cfg.apiKey`): sem chave ou com `useAi=false`, o app cai no **modo factual** (`factualMetadata`) — o app NÃO pode exigir chave para funcionar.
 5. **Rate-limit Gemini**: toda chamada passa por `acquireGeminiSlot`. RPD persiste entre reinícios — não burlar.
 6. **Throttle MusicBrainz ≥1.1s** (User-Agent obrigatório) — sob risco de ban.
 7. **Exclusão de biblioteca** só dentro da pasta configurada (guard em `library:delete`).

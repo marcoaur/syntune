@@ -62,6 +62,7 @@ Local files are **yours**. They play on the MP4 player in your pocket, on the US
 |:--|:--|:--|
 | 📥 | **Content platform import** | Paste a link to content you are entitled to → MP3 with complete tags and a high-res cover. No manual steps. |
 | 🧠 | **Fact-anchored AI enrichment** | MusicBrainz + iTunes provide the facts; Gemini only fills the gaps — never contradicts trusted data. Goodbye hallucinations. |
+| 🔑 | **Works without an API key** | No Gemini key (or AI turned off)? **Factual mode** tags straight from MusicBrainz / iTunes / LRCLIB + high-res cover. AI is an optional boost — toggle it in Settings. |
 | 🖼️ | **High-resolution covers** | Official artwork from Cover Art Archive and iTunes (600×600+), with a built-in cropper in the editor. |
 | 🎤 | **Synced lyrics (karaoke)** | Automatic lookup on LRCLIB + a built-in editor to time-sync lyrics line by line. |
 | 📡 | **Publish lyrics to LRCLIB** | Synced a lyric? Publish it straight from the app and it becomes public heritage. |
@@ -206,7 +207,7 @@ No prerequisites: `yt-dlp` and `ffmpeg` are downloaded automatically the first t
 ### ⚙️ 2. First-run setup
 
 1. Open **⚙️ Settings** in the app
-2. Paste your free **Gemini API key** ([get it at Google AI Studio](https://aistudio.google.com/apikey)) — *stored locally in `userData/config.json`, it never leaves your machine*
+2. *(Optional)* Paste a free **Gemini API key** ([get it at Google AI Studio](https://aistudio.google.com/apikey)) for AI enrichment — *without a key (or with the "Use AI" toggle off), the app runs in **factual mode** using MusicBrainz / iTunes / LRCLIB. Stored locally in `userData/config.json`; it never leaves your machine*
 3. Choose your music library folder
 4. *(Optional)* Add a **Genius** token for artist photos ([Genius API](https://genius.com/api-clients)) and a **Last.fm** key for stats and scrobbling ([Last.fm API](https://www.last.fm/api/account/create))
 

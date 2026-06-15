@@ -62,6 +62,7 @@ Arquivos locais são **seus**. Tocam no MP4 do seu bolso, no pendrive do carro, 
 |:--|:--|:--|
 | 📥 | **Importação de plataformas de conteúdo** | Cole o link de um conteúdo ao qual você tem direito → MP3 com tags completas e capa em alta. Sem etapas manuais. |
 | 🧠 | **Enriquecimento por IA ancorado em fatos** | MusicBrainz + iTunes trazem os fatos; o Gemini só preenche o que falta — nunca contradiz dados confiáveis. Adeus alucinação. |
+| 🔑 | **Funciona sem chave de API** | Sem chave do Gemini (ou IA desligada)? **Modo factual** etiqueta direto de MusicBrainz / iTunes / LRCLIB + capa em alta. A IA é um reforço opcional — liga/desliga em Configurações. |
 | 🖼️ | **Capas em alta resolução** | Cover Art Archive e iTunes (600×600+), com recorte embutido no editor. |
 | 🎤 | **Letras sincronizadas (karaokê)** | Busca automática no LRCLIB + editor próprio para sincronizar verso a verso. |
 | 📡 | **Publicação de letras no LRCLIB** | Sincronizou uma letra? Publique direto do app e ela vira patrimônio público. |
@@ -206,7 +207,7 @@ Sem pré-requisitos: `yt-dlp` e `ffmpeg` são baixados automaticamente na primei
 ### ⚙️ 2. Primeira configuração
 
 1. Abra **⚙️ Configurações** no app
-2. Cole sua chave gratuita da **API do Gemini** ([pegue no Google AI Studio](https://aistudio.google.com/apikey)) — *fica salva localmente em `userData/config.json`, nunca sai da sua máquina*
+2. *(Opcional)* Cole uma chave gratuita da **API do Gemini** ([pegue no Google AI Studio](https://aistudio.google.com/apikey)) para o enriquecimento por IA — *sem chave (ou com o botão "Usar IA" desligado), o app roda em **modo factual** usando MusicBrainz / iTunes / LRCLIB. Fica salva localmente em `userData/config.json`; nunca sai da sua máquina*
 3. Escolha a pasta da sua biblioteca de músicas
 4. *(Opcional)* Adicione um token do **Genius** para fotos de artistas ([Genius API](https://genius.com/api-clients)) e uma chave do **Last.fm** para estatísticas e scrobble ([Last.fm API](https://www.last.fm/api/account/create))
 
