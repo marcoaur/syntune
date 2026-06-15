@@ -65,3 +65,21 @@ jobs:
 
       - name: Electron pack test (dir only)
         run: npm run dist -- --dir --publish never
+
+  # Smoke E2E: lança o app real e garante boot + render sem erro de JS.
+  # Trava o merge p/ main (logo, o release) se o app não abrir.
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Smoke E2E (Electron via Playwright + xvfb)
+        run: xvfb-run --auto-servernum npm run test:e2e
