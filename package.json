@@ -47,6 +47,21 @@
     "portable": {
       "artifactName": "Syntune-Portable.exe"
     },
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "category": "public.app-category.music"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Audio",
+      "maintainer": "Marco <marcoxpg2@gmail.com>"
+    },
     "publish": [
       {
         "provider": "github",

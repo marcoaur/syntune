@@ -41,9 +41,14 @@ jobs:
       - name: i18n key parity
         run: node scripts/check-i18n.js
 
-  # Teste de empacotamento: garante que o app monta (sem gerar instaladores)
+  # Teste de empacotamento multiplataforma: garante que o app monta em
+  # Windows, macOS e Linux (sem gerar instaladores — só o app empacotado).
   pack:
-    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v6
 

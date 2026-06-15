@@ -65,6 +65,9 @@ function normalizeDrive(d) {
 }
 
 function queryRemovableDrives() {
+  // Detecção implementada só no Windows (Win32_DiskDrive/CIM via PowerShell).
+  // Em macOS/Linux a sync vira no-op — o resto do app roda normalmente.
+  if (process.platform !== 'win32') return Promise.resolve([]);
   return new Promise((resolve) => {
     const encoded = Buffer.from(PS_DRIVE_QUERY, 'utf16le').toString('base64');
     let ps;
