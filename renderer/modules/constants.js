@@ -8,41 +8,38 @@
  */
 
 // 5 estados claros do fluxo de letra (rótulos PT fixos + classes CSS de badge/dot)
+// Os textos vêm do i18n (titleKey/subKey/badgeKey, resolvidos com t() no render);
+// aqui ficam só as chaves i18n + as classes CSS de cada estado.
 export const LYRICS_STATUS = {
   // Sem letra, nunca buscou no LRCLIB
   empty: {
-    title: 'Sem letra',
-    sub: 'Toque para buscar ou criar',
+    titleKey: 'lyrics.status.empty.title', subKey: 'lyrics.status.empty.sub',
     dotCls: 'lm-status-dot--pending',
-    badgeCls: 'ev-lyrics-badge--pending', badgeLabel: '— Sem letra'
+    badgeCls: 'ev-lyrics-badge--pending', badgeKey: 'lyrics.badge.empty'
   },
   // Buscou no LRCLIB, não encontrou nada
   not_found: {
-    title: 'Não encontrada',
-    sub: 'LRCLIB não tem — você pode criar',
+    titleKey: 'lyrics.status.not_found.title', subKey: 'lyrics.status.not_found.sub',
     dotCls: 'lm-status-dot--not_found',
-    badgeCls: 'ev-lyrics-badge--not_found', badgeLabel: '⚠ Não no LRCLIB'
+    badgeCls: 'ev-lyrics-badge--not_found', badgeKey: 'lyrics.badge.not_found'
   },
   // Tem letra mas origem desconhecida (arquivo antigo sem tag)
   pending: {
-    title: 'Origem desconhecida',
-    sub: 'Letra presente, nunca sincronizada',
+    titleKey: 'lyrics.status.pending.title', subKey: 'lyrics.status.pending.sub',
     dotCls: 'lm-status-dot--local',
-    badgeCls: 'ev-lyrics-badge--local', badgeLabel: '⏳ Não verificada'
+    badgeCls: 'ev-lyrics-badge--local', badgeKey: 'lyrics.badge.pending'
   },
   // Letra criada/editada localmente, não publicada no LRCLIB
   local: {
-    title: 'Editando',
-    sub: 'Salva localmente · não contribuída',
+    titleKey: 'lyrics.status.local.title', subKey: 'lyrics.status.local.sub',
     dotCls: 'lm-status-dot--local',
-    badgeCls: 'ev-lyrics-badge--local', badgeLabel: '✍ Local'
+    badgeCls: 'ev-lyrics-badge--local', badgeKey: 'lyrics.badge.local'
   },
   // Letra veio do LRCLIB ou foi publicada lá com sucesso
   synced: {
-    title: 'Sincronizado',
-    sub: 'Via LRCLIB.net · em sincronia',
+    titleKey: 'lyrics.status.synced.title', subKey: 'lyrics.status.synced.sub',
     dotCls: 'lm-status-dot--synced',
-    badgeCls: 'ev-lyrics-badge--synced', badgeLabel: '✓ Sincronizado'
+    badgeCls: 'ev-lyrics-badge--synced', badgeKey: 'lyrics.badge.synced'
   }
 };
 

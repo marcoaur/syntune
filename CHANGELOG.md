@@ -7,6 +7,9 @@ o projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR/).
 
 ## [Não lançado]
 
+### Corrigido
+- **i18n da feature de letra:** badges de sincronização, card de status no editor de detalhes, modal de opções de letra (todos os textos contextuais), e o editor (menu de ferramentas, hints de atalhos, cabeçalhos, botões) estavam hardcoded em PT — agora todos passam pelo i18n (53 chaves novas, en/pt).
+
 ### Adicionado
 - **Seletor de idioma nas Configurações** — escolha manual entre os idiomas disponíveis em `locales/`, ignorando o locale do sistema; opção "Automático" volta a detectar pelo SO. Aplica reiniciando o app.
 

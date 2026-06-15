@@ -1434,7 +1434,7 @@ function renderEditorView() {
       const statusKey = computeLyricsStatus(syncTag, lyricsVisible);
       const st = LYRICS_STATUS[statusKey] || LYRICS_STATUS.empty;
       badge.className = 'ev-lyrics-badge ' + st.badgeCls;
-      badge.textContent = st.badgeLabel;
+      badge.textContent = t(st.badgeKey);
       // Mostra o badge apenas quando há letra e o estado é relevante
       badge.classList.toggle('hidden', !lyricsVisible || statusKey === 'empty');
     }).catch(() => {});
@@ -1611,7 +1611,7 @@ async function updateLyricsStatusCard() {
 
   // lscTitle = nome do status
   const titleEl = $('lscTitle');
-  if (titleEl) titleEl.textContent = st.title;
+  if (titleEl) titleEl.textContent = t(st.titleKey);
 
   // lscSub: se tem letra, mostra preview da primeira linha; senão, instrução do status
   const subEl = $('lscSub');
@@ -1620,9 +1620,9 @@ async function updateLyricsStatusCard() {
       const firstLine = lyricsVal.replace(/^\[.*?\]/gm, '').split('\n').find((l) => l.trim());
       subEl.textContent = firstLine
         ? (firstLine.length > 52 ? firstLine.slice(0, 49) + '…' : firstLine)
-        : st.sub;
+        : t(st.subKey);
     } else {
-      subEl.textContent = st.sub;
+      subEl.textContent = t(st.subKey);
     }
   }
 
@@ -1645,13 +1645,13 @@ function openLyricsModal() {
 
   // Título do modal = nome da música (ou fallback)
   const songTitle = $('title') && $('title').value.trim();
-  $('lmTitle').textContent = songTitle || 'Letra da Música';
+  $('lmTitle').textContent = songTitle || t('lyrics.modal.title');
 
   // Status dot + texto descritivo
   const dot = $('lmStatusDot');
   if (dot) dot.className = 'lm-status-dot ' + st.dotCls;
   const stTxt = $('lmStatusText');
-  if (stTxt) stTxt.textContent = st.sub;
+  if (stTxt) stTxt.textContent = t(st.subKey);
 
   // ---- Visibilidade e texto contextual de cada ação ----
 
@@ -1661,17 +1661,17 @@ function openLyricsModal() {
   const searchSub = searchBtn && searchBtn.querySelector('.lm-action-sub');
   if (searchLabel) {
     if (statusKey === 'synced') {
-      searchLabel.textContent = 'Buscar novamente';
-      if (searchSub) searchSub.textContent = 'Substituir pela versão mais recente do LRCLIB';
+      searchLabel.textContent = t('lyrics.modal.searchAgain');
+      if (searchSub) searchSub.textContent = t('lyrics.modal.searchSubSynced');
     } else if (statusKey === 'not_found') {
-      searchLabel.textContent = 'Buscar novamente';
-      if (searchSub) searchSub.textContent = 'Talvez já tenha sido adicionada à comunidade';
+      searchLabel.textContent = t('lyrics.modal.searchAgain');
+      if (searchSub) searchSub.textContent = t('lyrics.modal.searchSubNotFound');
     } else if (hasLyrics) {
-      searchLabel.textContent = 'Buscar na comunidade';
-      if (searchSub) searchSub.textContent = 'Substituir letra pelo resultado do LRCLIB';
+      searchLabel.textContent = t('lyrics.modal.search');
+      if (searchSub) searchSub.textContent = t('lyrics.modal.searchSubReplace');
     } else {
-      searchLabel.textContent = 'Buscar na comunidade';
-      if (searchSub) searchSub.textContent = 'Procurar no LRCLIB.net';
+      searchLabel.textContent = t('lyrics.modal.search');
+      if (searchSub) searchSub.textContent = t('lyrics.modal.searchSub');
     }
   }
 
@@ -1681,14 +1681,14 @@ function openLyricsModal() {
   const editSub = editBtn && editBtn.querySelector('.lm-action-sub');
   if (editLabel) {
     if (!hasLyrics) {
-      editLabel.textContent = 'Criar letra';
-      if (editSub) editSub.textContent = 'Escrever uma nova letra para este arquivo';
+      editLabel.textContent = t('lyrics.modal.create');
+      if (editSub) editSub.textContent = t('lyrics.modal.createSub');
     } else if (statusKey === 'synced') {
-      editLabel.textContent = 'Editar letra';
-      if (editSub) editSub.textContent = 'Atenção: editar irá quebrar a sincronia com o LRCLIB';
+      editLabel.textContent = t('lyrics.modal.edit');
+      if (editSub) editSub.textContent = t('lyrics.modal.editSubSynced');
     } else {
-      editLabel.textContent = 'Editar letra';
-      if (editSub) editSub.textContent = 'Abrir o editor de sincronização karaokê';
+      editLabel.textContent = t('lyrics.modal.edit');
+      if (editSub) editSub.textContent = t('lyrics.modal.editSub');
     }
   }
 
@@ -1699,12 +1699,12 @@ function openLyricsModal() {
     publishBtn.classList.toggle('hidden', !canPublish);
     const publishLabel = publishBtn.querySelector('strong');
     const publishSub = publishBtn.querySelector('.lm-action-sub');
-    if (publishLabel) publishLabel.textContent = 'Publicar no LRCLIB';
+    if (publishLabel) publishLabel.textContent = t('lyrics.modal.publish');
     if (publishSub) {
       if (statusKey === 'pending') {
-        publishSub.textContent = 'Contribuir com esta letra à comunidade';
+        publishSub.textContent = t('lyrics.modal.publishSubPending');
       } else {
-        publishSub.textContent = 'Contribuir com a comunidade de letras';
+        publishSub.textContent = t('lyrics.modal.publishSub');
       }
     }
   }
@@ -1913,8 +1913,8 @@ function leValidateOrder() {
     const s = parseLrcSeconds(leLines[idx] && leLines[idx].time);
     const bad = s >= 0 && prev >= 0 && s < prev;
     r.classList.toggle('le-row--bad-time', bad);
-    if (bad) r.title = 'Timestamp fora de ordem (menor que o anterior)';
-    else if (r.title === 'Timestamp fora de ordem (menor que o anterior)') r.title = '';
+    if (bad) r.title = t('lyrics.editor.outOfOrder');
+    else if (r.title === t('lyrics.editor.outOfOrder')) r.title = '';
     if (s >= 0) prev = s;
   });
 }
@@ -2161,7 +2161,7 @@ function createRow(i) {
   const num = document.createElement('span');
   num.className = 'le-row-num';
   num.textContent = String(i + 1);
-  num.title = 'Ouvir a partir desta linha';
+  num.title = t('lyrics.editor.playFromLine');
   num.onclick = () => leSeekToLine(i);
   if (line.time) num.classList.add('le-row-num--seek');
 
@@ -2315,7 +2315,7 @@ function createRow(i) {
   // Alça de arrasto — reordenar linhas
   const grip = document.createElement('span');
   grip.className = 'le-grip';
-  grip.title = 'Arrastar para reordenar';
+  grip.title = t('lyrics.editor.dragReorder');
   grip.draggable = true;
   grip.innerHTML = '<svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor"><circle cx="9" cy="6" r="1.6"/><circle cx="15" cy="6" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="18" r="1.6"/><circle cx="15" cy="18" r="1.6"/></svg>';
   grip.addEventListener('dragstart', (e) => {
@@ -2491,7 +2491,7 @@ $('leSaveBtn').addEventListener('click', async () => {
   const btn = $('leSaveBtn');
   const originalHtml = btn.innerHTML;
   btn.disabled = true;
-  btn.innerHTML = '<span style="display:inline-flex;align-items:center;gap:6px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="le-spin"><circle cx="12" cy="12" r="10" stroke-dasharray="40" stroke-dashoffset="10"/></svg>Salvando…</span>';
+  btn.innerHTML = '<span style="display:inline-flex;align-items:center;gap:6px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="le-spin"><circle cx="12" cy="12" r="10" stroke-dasharray="40" stroke-dashoffset="10"/></svg>' + t('lyrics.editor.saving') + '</span>';
 
   const syncedLyrics = serializeLines(leLines);
   $('lyrics').value = syncedLyrics;
