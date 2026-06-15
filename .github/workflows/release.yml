@@ -1,5 +1,5 @@
-# Build de produção a cada merge na main: gera os instaladores Windows e
-# publica/atualiza a release com a tag v<versão do package.json>.
+# Build de produção a cada merge na main: gera os instaladores de Windows,
+# macOS e Linux e publica/atualiza a release com a tag v<versão do package.json>.
 name: Build & Release
 
 on:
@@ -11,8 +11,13 @@ permissions:
   contents: write
 
 jobs:
+  # Builda os instaladores em cada plataforma (electron-builder usa o SO atual).
   build:
-    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v6
 
@@ -25,35 +30,51 @@ jobs:
         run: npm ci
 
       - name: Build installers
-        # --publish never: o electron-builder não deve tentar publicar sozinho
-        # (a release é criada no passo seguinte via gh)
+        # --publish never: o electron-builder não publica sozinho; a release é
+        # criada no job 'release' via gh, com os artefatos de todas as plataformas.
         run: npm run dist -- --publish never
+
+      - name: Upload installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: installers-${{ matrix.os }}
+          path: |
+            dist/*.exe
+            dist/*.blockmap
+            dist/*.dmg
+            dist/*.zip
+            dist/*.AppImage
+            dist/*.deb
+            dist/latest*.yml
+          if-no-files-found: ignore
+          retention-days: 1
+
+  # Junta os artefatos das 3 plataformas e cria/atualiza a release.
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Download all installers
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
 
       - name: Read version
         id: ver
-        shell: pwsh
-        run: |
-          $v = (Get-Content package.json | ConvertFrom-Json).version
-          "version=$v" >> $env:GITHUB_OUTPUT
+        run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
 
       - name: Create / update release
         env:
           GH_TOKEN: ${{ github.token }}
-        shell: pwsh
         run: |
-          $tag = "v${{ steps.ver.outputs.version }}"
-          # latest.yml + blockmap: metadados do electron-updater (auto-update do app)
-          $assets = @(
-            'dist/Syntune-Setup.exe',
-            'dist/Syntune-Setup.exe.blockmap',
-            'dist/Syntune-Portable.exe',
-            'dist/latest.yml'
-          )
-          # try/catch não captura exit code de exe em pwsh: usar $LASTEXITCODE
-          gh release view $tag 2>$null | Out-Null
-          if ($LASTEXITCODE -ne 0) {
-            gh release create $tag @assets --title "Syntune $tag" --generate-notes
-          } else {
-            gh release upload $tag @assets --clobber
-          }
-          if ($LASTEXITCODE -ne 0) { exit 1 }
+          set -e
+          tag="v${{ steps.ver.outputs.version }}"
+          files=$(find artifacts -type f)
+          echo "Assets a publicar:"; echo "$files"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" $files --clobber
+          else
+            gh release create "$tag" $files --title "Syntune $tag" --generate-notes
+          fi

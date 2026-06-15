@@ -7,6 +7,14 @@ o projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR/).
 
 ## [Não lançado]
 
+## [2.2.0] — 2026-06-15
+
+### Adicionado
+- **Suporte a macOS e Linux** — o app agora roda além do Windows. Instaladores `dmg`/`zip` (macOS) e `AppImage`/`deb` (Linux) gerados a cada release. A detecção/sync de dispositivos removíveis (CIM/PowerShell) vira no-op fora do Windows; o restante funciona em todas as plataformas. *(macOS/Linux ainda não assinados — notarização adiada.)*
+
+### Alterado
+- **Release multiplataforma:** o workflow de build/release passa a rodar em matrix (Windows + macOS + Linux), publicando os assets das três plataformas numa única release.
+
 ## [2.1.2] — 2026-06-15
 
 ### Documentação
@@ -54,7 +62,8 @@ o projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR/).
 
 Versões anteriores (≤ 2.0.6): ver as [Releases no GitHub](https://github.com/marcoaur/syntune/releases).
 
-[Não lançado]: https://github.com/marcoaur/syntune/compare/v2.1.2...HEAD
+[Não lançado]: https://github.com/marcoaur/syntune/compare/v2.2.0...HEAD
+[2.2.0]: https://github.com/marcoaur/syntune/releases/tag/v2.2.0
 [2.1.2]: https://github.com/marcoaur/syntune/releases/tag/v2.1.2
 [2.1.1]: https://github.com/marcoaur/syntune/releases/tag/v2.1.1
 [2.1.0]: https://github.com/marcoaur/syntune/releases/tag/v2.1.0
