@@ -2857,7 +2857,7 @@ $('cropModal').addEventListener('click', (e) => { if (e.target === $('cropModal'
 // ====================== Configurações ======================
 const modal = $('settingsModal');
 // Nomes de exibição dos idiomas (fallback: código em maiúsculas)
-const LANG_NAMES = { en: 'English', pt: 'Português', 'pt-br': 'Português (Brasil)', 'pt-pt': 'Português (Portugal)', es: 'Español', fr: 'Français', de: 'Deutsch', it: 'Italiano', ja: '日本語', zh: '中文' };
+const LANG_NAMES = { en: 'English', pt: 'Português', 'pt-br': 'Português (Brasil)', 'pt-pt': 'Português (Portugal)', es: 'Español', fr: 'Français', de: 'Deutsch', it: 'Italiano', ru: 'Русский', ja: '日本語', zh: '中文' };
 let langConfigured = 'auto'; // idioma salvo ('auto' = detectar pelo locale do SO)
 async function populateLanguageSelect() {
   let info = {};

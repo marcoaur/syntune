@@ -12,7 +12,7 @@ o projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR/).
 - **i18n da feature de letra:** badges de sincronização, card de status, modal de opções (textos contextuais), o editor (menu/hints/cabeçalhos/botões), **e os toasts/confirmações + erros de publicação (renderer e main)** estavam hardcoded em PT — agora tudo passa pelo i18n. Varredura confirma 0 strings de UI hardcoded restantes (67 chaves novas, en/pt).
 
 ### Adicionado
-- **Espanhol e Francês** — 2 novos idiomas de interface (alcance: Espanha + América Latina; França, Canadá, África). Aparecem automaticamente no seletor de idioma. Tradução completa dos 408 textos (revisão por nativo recomendada antes de campanhas nesses mercados).
+- **4 novos idiomas de interface — Espanhol, Francês, Alemão e Russo** (de 2 para 6 idiomas). Alcance: Espanha + América Latina; França/Canadá/África; mercados FOSS/privacidade de língua alemã; e Rússia (onde o modo factual brilha, pois o Gemini é geo-restrito). Aparecem automaticamente no seletor. Tradução completa dos 408 textos cada (revisão por nativo recomendada antes de campanhas nesses mercados).
 - **Seletor de idioma nas Configurações** — escolha manual entre os idiomas disponíveis em `locales/`, ignorando o locale do sistema; opção "Automático" volta a detectar pelo SO. Aplica reiniciando o app.
 
 ### Documentação
