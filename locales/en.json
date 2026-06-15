@@ -226,6 +226,8 @@
   "crop.apply": "Apply",
 
   "settings.title": "Settings",
+  "settings.language": "Interface language",
+  "settings.languageAuto": "Automatic (system language)",
   "settings.geminiKey": "Gemini API key",
   "settings.geminiLinkTitle": "Generate a key in Google AI Studio",
   "settings.apiKeyPlaceholder": "Paste your API key",

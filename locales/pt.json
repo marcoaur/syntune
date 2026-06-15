@@ -226,6 +226,8 @@
   "crop.apply": "Aplicar",
 
   "settings.title": "Configurações",
+  "settings.language": "Idioma da interface",
+  "settings.languageAuto": "Automático (idioma do sistema)",
   "settings.geminiKey": "Chave da API do Gemini",
   "settings.geminiLinkTitle": "Gerar chave no Google AI Studio",
   "settings.apiKeyPlaceholder": "Cole sua API key",

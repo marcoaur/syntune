@@ -7,6 +7,9 @@ o projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR/).
 
 ## [Não lançado]
 
+### Adicionado
+- **Seletor de idioma nas Configurações** — escolha manual entre os idiomas disponíveis em `locales/`, ignorando o locale do sistema; opção "Automático" volta a detectar pelo SO. Aplica reiniciando o app.
+
 ### Documentação
 - README (en/pt) reposicionado: herói "organize, enriqueça e possua sua biblioteca"; IA opcional; download de link como feature secundária (não a manchete). Seção de download inclui macOS/Linux.
 

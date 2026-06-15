@@ -2856,8 +2856,30 @@ $('cropModal').addEventListener('click', (e) => { if (e.target === $('cropModal'
 
 // ====================== Configurações ======================
 const modal = $('settingsModal');
+// Nomes de exibição dos idiomas (fallback: código em maiúsculas)
+const LANG_NAMES = { en: 'English', pt: 'Português', 'pt-br': 'Português (Brasil)', 'pt-pt': 'Português (Portugal)', es: 'Español', fr: 'Français', de: 'Deutsch', it: 'Italiano', ja: '日本語', zh: '中文' };
+let langConfigured = 'auto'; // idioma salvo ('auto' = detectar pelo locale do SO)
+async function populateLanguageSelect() {
+  let info = {};
+  try { info = await window.api.getI18n(); } catch { /* usa padrões */ }
+  const available = Array.isArray(info.available) ? info.available : [];
+  langConfigured = info.configured ? String(info.configured).toLowerCase() : 'auto';
+  const sel = $('language');
+  sel.innerHTML = '';
+  const auto = document.createElement('option');
+  auto.value = 'auto'; auto.textContent = t('settings.languageAuto');
+  sel.appendChild(auto);
+  for (const code of available) {
+    const o = document.createElement('option');
+    o.value = code; o.textContent = LANG_NAMES[code] || code.toUpperCase();
+    sel.appendChild(o);
+  }
+  sel.value = available.includes(langConfigured) ? langConfigured : 'auto';
+}
+
 $('settingsBtn').addEventListener('click', async () => {
   const cfg = await window.api.getConfig();
+  await populateLanguageSelect();
   $('apiKey').value = cfg.apiKey || '';
   $('useAi').checked = cfg.useAi !== false; // padrão: ligado (compat. instalações antigas)
   $('geniusToken').value = cfg.geniusToken || '';
@@ -2915,6 +2937,12 @@ $('saveSettings').addEventListener('click', async () => {
     model: $('model').value,
     downloadFolder: $('downloadFolder').value.trim()
   });
+  // troca de idioma: aplica reiniciando o app (o relaunch encerra a execução aqui)
+  const langSel = $('language').value;
+  if (langSel !== langConfigured) {
+    await window.api.setLanguage(langSel === 'auto' ? '' : langSel);
+    return;
+  }
   closeViewAnimated(modal);
   toast(t('settings.saved'), 'success');
   // se o token do Genius mudou, limpa o cache em memória p/ buscar fotos novamente

@@ -27,6 +27,7 @@ contextBridge.exposeInMainWorld('api', {
 
   // idioma e textos da interface
   getI18n: () => ipcRenderer.invoke('i18n:get'),
+  setLanguage: (lang) => ipcRenderer.invoke('i18n:setLanguage', lang),
 
   // configuração
   getConfig: () => ipcRenderer.invoke('config:get'),

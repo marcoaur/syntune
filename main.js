@@ -260,7 +260,26 @@ nativeTheme.on('updated', () => {
 ipcMain.handle('app:getVersion', () => app.getVersion());
 
 // ---------- IPC: idioma e textos da interface ----------
-ipcMain.handle('i18n:get', () => ({ lang: i18n.getLanguage(), strings: i18n.getStrings() }));
+ipcMain.handle('i18n:get', () => ({
+  lang: i18n.getLanguage(),
+  strings: i18n.getStrings(),
+  available: i18n.availableLanguages(),       // idiomas disponíveis em locales/
+  configured: readConfig().language || null   // escolha manual (null = automático/locale)
+}));
+
+// Define o idioma da UI, ignorando o locale do SO. Valor vazio/'auto' remove a
+// escolha → volta a detectar pelo locale. Aplica reiniciando o app (recarrega o
+// i18n de forma limpa, sem ter de re-renderizar toda a UI em runtime).
+ipcMain.handle('i18n:setLanguage', (_e, lang) => {
+  const cfg = readConfig();
+  const langs = i18n.availableLanguages();
+  const v = lang ? String(lang).toLowerCase() : '';
+  if (v && langs.includes(v)) cfg.language = v;
+  else delete cfg.language;
+  writeConfig(cfg);
+  app.relaunch();
+  app.exit(0);
+});
 
 // ---------- IPC: configuração ----------
 ipcMain.handle('config:get', () => readConfig());
