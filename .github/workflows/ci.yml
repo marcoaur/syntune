@@ -19,9 +19,13 @@ jobs:
           node-version: 22
 
       - name: Syntax check (all project JS)
+        shell: bash
         run: |
           set -e
-          for f in main.js preload.js i18n.js sync-engine.js sync-worker.js scripts/*.js renderer/*.js; do
+          shopt -s globstar nullglob
+          # Todo JS do projeto (cobre src/** e renderer/modules/** automaticamente).
+          for f in **/*.js; do
+            [[ "$f" == node_modules/* ]] && continue
             echo "node --check $f"
             node --check "$f"
           done
@@ -50,6 +54,9 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Unit tests (node:test)
+        run: npm test
 
       - name: Electron pack test (dir only)
         run: npm run dist -- --dir --publish never
