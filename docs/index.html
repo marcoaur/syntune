@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Syntune — Organize, enrich and own your music library</title>
+  <meta name="description" content="Offline music organizer & player with streaming-grade polish. Fact-anchored tags, high-res covers, synced-lyrics karaoke. No signup, works in 30s, private. Windows · macOS · Linux. Free & open-source." />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎵</text></svg>" />
+  <!-- Open Graph / Twitter -->
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="Syntune — Your music. Your files. Forever." />
+  <meta property="og:description" content="Organize, enrich and own your music library — offline and private. Streaming-grade polish, none of the rent." />
+  <meta property="og:image" content="https://marcoaur.github.io/syntune/social-preview.jpg" />
+  <meta property="og:url" content="https://marcoaur.github.io/syntune/" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <style>
+    :root {
+      --bg: #0b0b0f; --panel: #15151c; --txt: #ededf2; --mut: #a0a0ad;
+      --acc: #7c5cff; --acc2: #00c2ff; --ok: #34d399; --line: #26262f;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body {
+      background: var(--bg); color: var(--txt);
+      font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+    a { color: var(--acc2); text-decoration: none; }
+    .wrap { max-width: 1040px; margin: 0 auto; padding: 0 20px; }
+    .glow {
+      position: fixed; inset: 0; z-index: -1; pointer-events: none;
+      background:
+        radial-gradient(60% 50% at 50% 0%, rgba(124,92,255,.20), transparent 70%),
+        radial-gradient(40% 40% at 85% 20%, rgba(0,194,255,.12), transparent 70%);
+    }
+    /* Hero */
+    header { text-align: center; padding: 88px 0 56px; }
+    .logo { font-size: 15px; letter-spacing: .35em; color: var(--mut); text-transform: uppercase; }
+    h1 {
+      font-size: clamp(40px, 7vw, 72px); line-height: 1.05; margin: 18px 0 10px; font-weight: 800;
+      background: linear-gradient(120deg, #fff 30%, var(--acc) 75%, var(--acc2));
+      -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+    }
+    .tag { font-size: clamp(18px, 2.6vw, 24px); color: var(--txt); max-width: 720px; margin: 0 auto; }
+    .sub { color: var(--mut); margin-top: 14px; max-width: 640px; margin-left: auto; margin-right: auto; }
+    /* CTAs */
+    .cta { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; margin: 34px 0 14px; }
+    .btn {
+      display: inline-flex; align-items: center; gap: 8px; padding: 14px 24px; border-radius: 12px;
+      font-weight: 700; font-size: 16px; border: 1px solid var(--line); transition: transform .12s, box-shadow .12s;
+    }
+    .btn:hover { transform: translateY(-2px); }
+    .btn-primary {
+      background: linear-gradient(120deg, var(--acc), var(--acc2)); color: #0b0b0f; border: none;
+      box-shadow: 0 8px 30px rgba(124,92,255,.35);
+    }
+    .btn-ghost { background: var(--panel); color: var(--txt); }
+    .alt { color: var(--mut); font-size: 14px; }
+    .alt a { color: var(--mut); text-decoration: underline; }
+    /* Trust strip */
+    .trust { display: flex; gap: 10px 22px; justify-content: center; flex-wrap: wrap; color: var(--mut); font-size: 14px; margin-top: 24px; }
+    .trust b { color: var(--ok); }
+    /* Sections */
+    section { padding: 56px 0; }
+    h2 { font-size: clamp(26px, 4vw, 38px); text-align: center; margin-bottom: 8px; }
+    .lead { text-align: center; color: var(--mut); max-width: 640px; margin: 0 auto 36px; }
+    .shot { width: 100%; border-radius: 14px; border: 1px solid var(--line); display: block; box-shadow: 0 16px 50px rgba(0,0,0,.5); }
+    .feature { display: grid; grid-template-columns: 1fr 1fr; gap: 36px; align-items: center; margin-bottom: 48px; }
+    .feature:nth-child(even) .txt { order: 2; }
+    .feature h3 { font-size: 24px; margin-bottom: 10px; }
+    .feature p { color: var(--mut); }
+    @media (max-width: 760px) { .feature { grid-template-columns: 1fr; } .feature:nth-child(even) .txt { order: 0; } }
+    /* Highlight callout */
+    .callout {
+      background: linear-gradient(120deg, rgba(124,92,255,.12), rgba(0,194,255,.08));
+      border: 1px solid var(--line); border-radius: 16px; padding: 32px; text-align: center; margin: 8px 0;
+    }
+    .callout h2 { margin-bottom: 6px; }
+    /* Feature grid */
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-top: 28px; }
+    .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 20px; }
+    .card .ic { font-size: 24px; } .card h4 { margin: 8px 0 4px; } .card p { color: var(--mut); font-size: 14px; }
+    /* Footer */
+    footer { border-top: 1px solid var(--line); padding: 36px 0 64px; text-align: center; color: var(--mut); font-size: 14px; }
+    footer a { margin: 0 10px; }
+  </style>
+</head>
+<body>
+  <div class="glow"></div>
+
+  <header class="wrap">
+    <div class="logo">♪ Syntune</div>
+    <h1>Your music. Your files. Forever.</h1>
+    <p class="tag">Organize, enrich and <strong>own</strong> your music library — offline and private. Streaming-grade polish, none of the rent.</p>
+    <p class="sub">A desktop player &amp; tag editor that turns messy MP3s into a first-class library: fact-anchored metadata, high-res covers and synced-lyrics karaoke.</p>
+
+    <div class="cta">
+      <a class="btn btn-primary" href="https://github.com/marcoaur/syntune/releases/latest/download/Syntune-Setup.exe">⬇️ Download for Windows</a>
+      <a class="btn btn-ghost" href="https://github.com/marcoaur/syntune/releases/latest">macOS &amp; Linux</a>
+    </div>
+    <p class="alt">Portable build &amp; all versions on the <a href="https://github.com/marcoaur/syntune/releases">releases page</a>.</p>
+
+    <div class="trust">
+      <span><b>✓</b> No signup</span>
+      <span><b>✓</b> Works in 30s</span>
+      <span><b>✓</b> Private &amp; offline</span>
+      <span><b>✓</b> Free &amp; open-source</span>
+      <span><b>✓</b> Windows · macOS · Linux</span>
+    </div>
+  </header>
+
+  <section class="wrap">
+    <div class="callout">
+      <h2>No API key required</h2>
+      <p class="lead" style="margin-bottom:0">Without a Gemini key, Syntune runs in <strong>factual mode</strong> — tagging straight from MusicBrainz, iTunes and LRCLIB, with high-res covers. AI is an optional boost, not a wall. Start in 30 seconds.</p>
+    </div>
+  </section>
+
+  <section class="wrap">
+    <h2>See it move</h2>
+    <p class="lead">A living interface where every cover paints the player, a real-time spectrum, and karaoke that scrolls with the beat.</p>
+
+    <div class="feature">
+      <div class="txt">
+        <h3>🧠 Fact-anchored enrichment</h3>
+        <p>MusicBrainz + iTunes provide the facts; AI only fills the gaps — never contradicts trusted data. Official album, year, track number and a 600×600+ cover, automatically.</p>
+      </div>
+      <img class="shot" src="img/immersive-view-1.gif" alt="Immersive player with dynamic color" loading="lazy" />
+    </div>
+
+    <div class="feature">
+      <div class="txt">
+        <h3>🎤 Synced-lyrics karaoke</h3>
+        <p>Automatic lookup on LRCLIB, plus a built-in editor to time-sync lyrics line by line — and publish them back so they become public heritage.</p>
+      </div>
+      <img class="shot" src="img/lyrics-editor.gif" alt="Synced lyrics editor" loading="lazy" />
+    </div>
+
+    <div class="feature">
+      <div class="txt">
+        <h3>🎨 Streaming-grade, but yours</h3>
+        <p>Queue, shuffle, playlists, a fullscreen "Now Playing", a 6-band equalizer and a spectrum visualizer — over files that never leave your machine.</p>
+      </div>
+      <img class="shot" src="img/immersive-view-2.gif" alt="Now playing fullscreen" loading="lazy" />
+    </div>
+  </section>
+
+  <section class="wrap">
+    <h2>Everything it does</h2>
+    <div class="grid">
+      <div class="card"><div class="ic">🖼️</div><h4>High-res covers</h4><p>Cover Art Archive + iTunes, with a built-in cropper.</p></div>
+      <div class="card"><div class="ic">📡</div><h4>Publish lyrics</h4><p>Contribute synced lyrics back to LRCLIB from the app.</p></div>
+      <div class="card"><div class="ic">📥</div><h4>Pull from a link</h4><p>Need a track you're entitled to? Paste a link → tagged MP3.</p></div>
+      <div class="card"><div class="ic">🎛️</div><h4>6-band EQ</h4><p>Shape bass, mids and treble in real time via Web Audio.</p></div>
+      <div class="card"><div class="ic">🖧</div><h4>Device sync</h4><p>Mirror your library to USB / MP3 players with playlists.</p></div>
+      <div class="card"><div class="ic">📊</div><h4>Last.fm stats</h4><p>Artist bios, play counts and scrobbling.</p></div>
+      <div class="card"><div class="ic">🔒</div><h4>Private by design</h4><p>Secrets encrypted at rest; nothing phones home.</p></div>
+      <div class="card"><div class="ic">🪶</div><h4>Lightweight</h4><p>Native cover protocol, audio streamed straight from disk.</p></div>
+    </div>
+  </section>
+
+  <section class="wrap" style="text-align:center;">
+    <h2>Stop renting your music</h2>
+    <p class="lead">Local files play on the stick in your car, on a PC with no internet, twenty years from now. Take care of them — beautifully.</p>
+    <div class="cta">
+      <a class="btn btn-primary" href="https://github.com/marcoaur/syntune/releases/latest/download/Syntune-Setup.exe">⬇️ Download for Windows</a>
+      <a class="btn btn-ghost" href="https://github.com/marcoaur/syntune/releases/latest">macOS &amp; Linux</a>
+    </div>
+  </section>
+
+  <footer class="wrap">
+    <p>
+      <a href="https://github.com/marcoaur/syntune">GitHub</a> ·
+      <a href="https://github.com/marcoaur/syntune/releases">Releases</a> ·
+      <a href="https://github.com/marcoaur/syntune/blob/main/README.md">Docs</a> ·
+      <a href="https://github.com/marcoaur/syntune/blob/main/LICENSE">GPL-3.0</a>
+    </p>
+    <p style="margin-top:10px;">Free &amp; open-source · Windows · macOS · Linux<br/>
+    <span style="opacity:.7">macOS &amp; Linux builds aren't code-signed yet — see the releases page for install notes.</span></p>
+  </footer>
+</body>
+</html>

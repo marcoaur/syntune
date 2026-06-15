@@ -5,6 +5,10 @@ name: Build & Release
 on:
   push:
     branches: [main]
+    # Mudanças só de docs/landing/markdown não geram release.
+    paths-ignore:
+      - 'docs/**'
+      - '**.md'
   workflow_dispatch:
 
 permissions:
