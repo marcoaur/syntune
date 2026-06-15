@@ -226,6 +226,11 @@
   "crop.apply": "Aplicar",
 
   "settings.title": "Configurações",
+  "settings.secLanguage": "Idioma",
+  "settings.secAi": "IA (Gemini)",
+  "settings.secGenius": "Genius (fotos de artistas)",
+  "settings.secLastfm": "Last.fm",
+  "settings.secLibrary": "Biblioteca e downloads",
   "settings.language": "Idioma da interface",
   "settings.languageAuto": "Automático (idioma do sistema)",
   "lyrics.status.empty.title": "Sem letra",

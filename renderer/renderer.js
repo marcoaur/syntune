@@ -2901,6 +2901,17 @@ $('clearFolder').addEventListener('click', () => { $('downloadFolder').value = '
 $('cancelSettings').addEventListener('click', () => closeViewAnimated(modal));
 modal.addEventListener('click', (e) => { if (e.target === modal) closeViewAnimated(modal); });
 
+// Accordion das Configurações: 1 seção aberta por vez. Clicar numa seção fecha as
+// demais; clicar na já aberta a recolhe.
+$('settingsAcc').addEventListener('click', (e) => {
+  const head = e.target.closest('.acc-head');
+  if (!head) return;
+  const item = head.parentElement;
+  const wasOpen = item.classList.contains('open');
+  $('settingsAcc').querySelectorAll('.acc-item.open').forEach((el) => el.classList.remove('open'));
+  if (!wasOpen) item.classList.add('open');
+});
+
 $('lastfmScrobbleEnabled').addEventListener('change', (e) => {
   $('lastfmScrobbleFields').classList.toggle('hidden', !e.target.checked);
 });

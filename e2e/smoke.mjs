@@ -35,3 +35,25 @@ test('app boota: janela abre, UI principal renderiza, sem erro de JS', { timeout
     await app.close();
   }
 });
+
+test('Configurações: accordion abre só 1 seção por vez', { timeout: 60000 }, async () => {
+  const app = await electron.launch({ args: ['.'], cwd: root });
+  try {
+    const win = await app.firstWindow();
+    await win.waitForLoadState('domcontentloaded');
+    await win.waitForSelector('#settingsBtn', { timeout: 20000 });
+    await win.click('#settingsBtn');
+    await win.waitForSelector('#settingsAcc .acc-item', { timeout: 10000 });
+
+    // estado inicial: exatamente 1 seção aberta
+    assert.equal(await win.locator('#settingsAcc .acc-item.open').count(), 1, 'deveria abrir 1 seção por padrão');
+
+    // clica a 3ª seção → continua 1 aberta, e é a clicada (as outras colapsam)
+    await win.locator('#settingsAcc .acc-head').nth(2).click();
+    assert.equal(await win.locator('#settingsAcc .acc-item.open').count(), 1, 'só 1 seção pode ficar aberta');
+    const thirdOpen = await win.locator('#settingsAcc .acc-item').nth(2).evaluate((el) => el.classList.contains('open'));
+    assert.ok(thirdOpen, 'a seção clicada deveria estar aberta');
+  } finally {
+    await app.close();
+  }
+});

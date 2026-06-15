@@ -8,6 +8,7 @@ o projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR/).
 ## [Não lançado]
 
 ### Corrigido
+- **Modal de Configurações cortado:** o conteúdo extrapolava a janela. Agora as configurações são **seções colapsíveis (accordion)** — só 1 aberta por vez (Idioma, IA, Genius, Last.fm, Biblioteca) — e a sheet tem altura máxima com rolagem de segurança.
 - **i18n da feature de letra:** badges de sincronização, card de status no editor de detalhes, modal de opções de letra (todos os textos contextuais), e o editor (menu de ferramentas, hints de atalhos, cabeçalhos, botões) estavam hardcoded em PT — agora todos passam pelo i18n (53 chaves novas, en/pt).
 
 ### Adicionado
