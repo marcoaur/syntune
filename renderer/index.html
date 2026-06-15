@@ -552,6 +552,11 @@
         </span>
         <input id="apiKey" type="password" class="input" placeholder="Cole sua API key" data-i18n-placeholder="settings.apiKeyPlaceholder" />
       </label>
+      <label class="field" style="flex-direction: row; align-items: center; justify-content: space-between; margin-top: 4px;">
+        <span class="field-label-row" data-i18n="settings.useAi">Usar IA (Gemini) no enriquecimento</span>
+        <label class="switch"><input id="useAi" type="checkbox" /><span class="track"></span></label>
+      </label>
+      <span class="hint-text" data-i18n="settings.useAiHint" style="margin-top: -6px; margin-bottom: 8px; display: block;">Opcional. Sem IA (ou sem chave), o app usa só fontes factuais (MusicBrainz/iTunes/LRCLIB).</span>
       <label class="field">
         <span class="field-label-row">
           <span data-i18n="settings.geniusToken">Token do Genius (fotos de artistas)</span>
@@ -826,6 +831,6 @@
 
   <div id="toast" class="toast hidden"></div>
 
-  <script src="renderer.js"></script>
+  <script type="module" src="renderer.js"></script>
 </body>
 </html>
