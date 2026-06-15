@@ -7,8 +7,14 @@ o projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR/).
 
 ## [Não lançado]
 
+## [2.1.1] — 2026-06-15
+
+### Alterado
+- **CI:** actions `actions/checkout` e `actions/setup-node` atualizadas para o runtime Node 24 (`@v4` → `@v6`), resolvendo a deprecação do Node 20.
+
 ### Limpeza
 - Remoção de código não utilizado e de comentários-ponteiro deixados pela migração modular (`allEqPresets`, breadcrumbs `// X → src/…` em `main.js`).
+- Adicionado `CHANGELOG.md`.
 
 ## [2.1.0] — 2026-06-15
 
@@ -43,7 +49,8 @@ o projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR/).
 
 Versões anteriores (≤ 2.0.6): ver as [Releases no GitHub](https://github.com/marcoaur/syntune/releases).
 
-[Não lançado]: https://github.com/marcoaur/syntune/compare/v2.1.0...HEAD
+[Não lançado]: https://github.com/marcoaur/syntune/compare/v2.1.1...HEAD
+[2.1.1]: https://github.com/marcoaur/syntune/releases/tag/v2.1.1
 [2.1.0]: https://github.com/marcoaur/syntune/releases/tag/v2.1.0
 [2.0.8]: https://github.com/marcoaur/syntune/releases/tag/v2.0.8
 [2.0.7]: https://github.com/marcoaur/syntune/releases/tag/v2.0.7
