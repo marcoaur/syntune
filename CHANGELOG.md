@@ -9,7 +9,7 @@ o projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR/).
 
 ### Corrigido
 - **Modal de Configurações cortado:** o conteúdo extrapolava a janela. Agora as configurações são **seções colapsíveis (accordion)** — só 1 aberta por vez (Idioma, IA, Genius, Last.fm, Biblioteca) — e a sheet tem altura máxima com rolagem de segurança.
-- **i18n da feature de letra:** badges de sincronização, card de status no editor de detalhes, modal de opções de letra (todos os textos contextuais), e o editor (menu de ferramentas, hints de atalhos, cabeçalhos, botões) estavam hardcoded em PT — agora todos passam pelo i18n (53 chaves novas, en/pt).
+- **i18n da feature de letra:** badges de sincronização, card de status, modal de opções (textos contextuais), o editor (menu/hints/cabeçalhos/botões), **e os toasts/confirmações + erros de publicação (renderer e main)** estavam hardcoded em PT — agora tudo passa pelo i18n. Varredura confirma 0 strings de UI hardcoded restantes (67 chaves novas, en/pt).
 
 ### Adicionado
 - **Seletor de idioma nas Configurações** — escolha manual entre os idiomas disponíveis em `locales/`, ignorando o locale do sistema; opção "Automático" volta a detectar pelo SO. Aplica reiniciando o app.

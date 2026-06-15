@@ -1757,7 +1757,7 @@ $('lmSearchBtn').addEventListener('click', async () => {
     // ✅ Encontrado no LRCLIB → sincronia imediata
     if (currentFilePath) await window.api.lyricsSetSyncStatus(currentFilePath, 'synced');
     await updateLyricsStatusCard();
-    toast('Letra sincronizada com o LRCLIB! ✓', 'success');
+    toast(t('lyrics.toast.synced'), 'success');
     closeLyricsModal();
     // Salva no MP3 com tag synced
     saveDetailsWithSync('synced');
@@ -1765,7 +1765,7 @@ $('lmSearchBtn').addEventListener('click', async () => {
     // Não encontrado → marca e mantém modal aberto com estado atualizado
     if (currentFilePath) await window.api.lyricsSetSyncStatus(currentFilePath, 'not_found');
     await updateLyricsStatusCard();
-    toast('Não encontrada no LRCLIB. Você pode criar a letra! ✍️', '');
+    toast(t('lyrics.toast.notFoundCreate'), '');
     // Reabre o modal com o estado atualizado (not_found)
     openLyricsModal();
   }
@@ -1788,7 +1788,7 @@ $('lmPublishBtn').addEventListener('click', async () => {
 
   if (!dur) {
     btn.classList.remove('lm-loading');
-    toast('Toque a música primeiro para obter a duração antes de publicar.', 'error');
+    toast(t('lyrics.toast.playFirst'), 'error');
     return;
   }
 
@@ -1805,10 +1805,10 @@ $('lmPublishBtn').addEventListener('click', async () => {
   btn.classList.remove('lm-loading');
 
   if (pubRes.error) {
-    toast('Erro ao publicar: ' + pubRes.error, 'error');
+    toast(t('lyrics.toast.publishError', { msg: pubRes.error }), 'error');
   } else {
     await updateLyricsStatusCard();
-    toast('Letra publicada na comunidade LRCLIB! Obrigado por contribuir. 🎶', 'success');
+    toast(t('lyrics.toast.published'), 'success');
     closeLyricsModal();
     // Salva automaticamente a tag 'synced' no MP3
     saveDetailsWithSync('synced');
@@ -1817,11 +1817,11 @@ $('lmPublishBtn').addEventListener('click', async () => {
 
 // -- Remover letra --
 $('lmClearBtn').addEventListener('click', async () => {
-  if (!confirm('Remover a letra deste arquivo MP3?')) return;
+  if (!confirm(t('lyrics.confirm.remove'))) return;
   $('lyrics').value = '';
   if (currentFilePath) await window.api.lyricsSetSyncStatus(currentFilePath, 'not_found');
   await updateLyricsStatusCard();
-  toast('Letra removida.', '');
+  toast(t('lyrics.toast.removed'), '');
   closeLyricsModal();
   saveDetailsWithSync('not_found');
 });
@@ -1888,7 +1888,7 @@ function cycleSpeed() {
 
 // Desloca TODOS os timestamps por delta segundos (offset global)
 function leOffsetAll(deltaSec) {
-  if (!leLines.some(l => l.time)) { toast('Nenhum timestamp para deslocar.', ''); return; }
+  if (!leLines.some(l => l.time)) { toast(t('lyrics.toast.noTimestamps'), ''); return; }
   leRecord();
   leLines.forEach(l => {
     const s = parseLrcSeconds(l.time);
@@ -2404,7 +2404,7 @@ function focusLineText(idx) {
 
 // Fecha o editor pedindo confirmação se houver alterações não salvas
 function leTryClose() {
-  if (leDirty && !confirm('Descartar as alterações não salvas da letra?')) return;
+  if (leDirty && !confirm(t('lyrics.confirm.discard'))) return;
   closeLyricsEditor();
 }
 
@@ -2446,7 +2446,7 @@ document.addEventListener('click', () => { if (leMenuIsOpen()) leMenuClose(); })
 $('leOffMinus').addEventListener('click', () => leOffsetAll(-0.1));
 $('leOffPlus').addEventListener('click', () => leOffsetAll(0.1));
 $('leClearTimes').addEventListener('click', () => {
-  if (leLines.some(l => l.time) && confirm('Remover todos os timestamps? O texto é mantido (desfazível com Ctrl+Z).')) {
+  if (leLines.some(l => l.time) && confirm(t('lyrics.confirm.clearTimes'))) {
     leClearAllTimes();
   }
   leMenuClose();
@@ -3552,7 +3552,7 @@ function npOpen() { return !$('nowPlaying').classList.contains('hidden'); }
 function lyricsEditorOpen() { return !$('lyricsEditorModal').classList.contains('hidden'); }
 function blockedDuringLyricsEdit() {
   if (lyricsEditorOpen()) {
-    toast('Finalize e salve a edição da letra para habilitar esta função.', '');
+    toast(t('lyrics.toast.finishEdit'), '');
     return true;
   }
   return false;

@@ -463,7 +463,7 @@ ipcMain.handle('lyrics:getSyncStatus', (_e, filePath) => {
 });
 
 ipcMain.handle('lyrics:setSyncStatus', (_e, { filePath, status }) => {
-  if (!filePath || !fs.existsSync(filePath)) return { error: 'file not found' };
+  if (!filePath || !fs.existsSync(filePath)) return { error: t('main.fileNotFound') };
   writeLrclibSync(filePath, status);
   return { ok: true };
 });
@@ -984,10 +984,10 @@ ipcMain.handle('lastfm:getArtistInfo', (_e, { artist } = {}) => {
 
 ipcMain.handle('lyrics:publish', async (_e, payload) => {
   const { trackName, artistName, albumName, duration, plainLyrics, syncedLyrics, filePath } = payload;
-  if (!trackName || !artistName || !duration) return { error: 'Campos obrigatórios ausentes' };
+  if (!trackName || !artistName || !duration) return { error: t('lyrics.publish.missingFields') };
 
   const token = await solveLrclibChallenge();
-  if (!token) return { error: 'Falha ao gerar o token de contribuição (PoW).' };
+  if (!token) return { error: t('lyrics.publish.tokenFail') };
 
   const body = {
     trackName,
@@ -1015,7 +1015,7 @@ ipcMain.handle('lyrics:publish', async (_e, payload) => {
       }
       return { success: true };
     } else {
-      let msg = 'Erro na API LRCLIB';
+      let msg = t('lyrics.publish.apiError');
       try { const r = await res.json(); msg = r.message || r.error || msg; } catch {}
       return { error: msg };
     }
