@@ -20,17 +20,8 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - uses: github/codeql-action/init@v3
+      - uses: github/codeql-action/init@v4
         with:
           languages: javascript
-          # só o código do app — node_modules/dist já são ignorados por padrão
-          paths: |
-            main.js
-            preload.js
-            i18n.js
-            sync-engine.js
-            sync-worker.js
-            renderer
-            scripts
 
-      - uses: github/codeql-action/analyze@v3
+      - uses: github/codeql-action/analyze@v4
