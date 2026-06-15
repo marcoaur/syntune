@@ -1,3 +1,12 @@
+/**
+ * @module  sync-engine
+ * @badge   🟨 DEVICE · FS · ASYNC-IO · PARALLEL · DELTA-SYNC · NO-ELECTRON
+ * @role    Motor puro de varredura/cópia/diff PC↔dispositivo: I/O assíncrono, paralelismo controlado, cache por stat (mtime/size), índice reverso e delta sync.
+ * @inputs  caminhos PC/dispositivo, escopo, callbacks de progresso
+ * @outputs estatísticas de scan, resultado de sync, eventos de progresso
+ * @deps    fs, path (puro Node — roda dentro do worker thread)
+ * @notes   Sem dependências do Electron — testável fora do app. Serializado por dispositivo no caller.
+ */
 // ====================================================================
 // Motor de sincronização (puro Node, sem dependências do Electron).
 // Otimizado com I/O Assíncrono, Paralelismo Controlado, Cache baseado

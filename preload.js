@@ -1,3 +1,12 @@
+/**
+ * @module  preload
+ * @badge   🟥 CORE · IPC-BRIDGE · CONTEXT-ISOLATED
+ * @role    Única ponte renderer↔main: expõe `window.api` (invoke/send/on) via contextBridge. Renderer não acessa Node direto.
+ * @inputs  chamadas de window.api no renderer
+ * @outputs ipcRenderer.invoke/send/on encapsulados
+ * @deps    electron (contextBridge, ipcRenderer, webUtils)
+ * @notes   Toda nova IPC precisa de handler em main.js E método exposto aqui.
+ */
 const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 contextBridge.exposeInMainWorld('api', {
