@@ -33,7 +33,6 @@ const createSyncController = require('./src/devices/sync-controller'); // 🟨 D
 if (!app.isPackaged) {
   app.setPath('userData', path.join(app.getPath('appData'), 'syntune-dev'));
 }
-// Config + segredos (AES-256-GCM em repouso + safeStorage) -> src/config/config-store.js + src/config/secrets.js (🟪 CONFIG)
 
 // Instancia o serviço Gemini injetando o acesso a config (factory-DI):
 // loadGeminiUsage/persistGeminiUsage usam readConfig/writeConfig p/ persistir o RPD.
@@ -273,7 +272,6 @@ ipcMain.handle('config:set', (_e, cfg) => {
   return merged;
 });
 
-// yt-dlp/ffmpeg ensure + fetchYouTubeContext + sanitizeName/isYouTubeUrl -> src/services/youtube.js (🟦 SERVICE)
 
 // ---------- IPC: baixar MP3 do YouTube ----------
 // Aceita uma string (URL) ou um objeto { jobId, url }. O jobId acompanha os
@@ -411,7 +409,6 @@ function uniquePath(destPath) {
   return candidate;
 }
 
-// readId3Fast → src/media/id3.js (🟩 MEDIA)
 
 // ---------- IPC: ler tags existentes do MP3 ----------
 ipcMain.handle('mp3:readTags', (_e, filePath) => {
@@ -439,7 +436,6 @@ ipcMain.handle('mp3:readTags', (_e, filePath) => {
   return out;
 });
 
-// lyricsText, LRCLIB_SYNC_DESC, readLrclibSync, writeLrclibSync → src/media/id3.js (🟩 MEDIA)
 
 // ---------- IPC: ler/gravar tag de sincronização LRCLIB ----------
 ipcMain.handle('lyrics:getSyncStatus', (_e, filePath) => {
@@ -523,7 +519,6 @@ ipcMain.handle('mp3:cover', (_e, filePath) => coverDataUrl(filePath));
 // ---------- IPC: ler imagem como data URL (preview) ----------
 ipcMain.handle('image:preview', (_e, imagePath) => imagePreviewDataUrl(imagePath));
 
-// Gemini engine (rate-limit por modelo + callGemini + ID3_SCHEMA) -> src/services/gemini.js (factory-DI)
 
 // ---------- IPC: pipeline inteligente (fontes factuais + 2 chamadas ao Gemini) ----------
 // 0) FONTES FACTUAIS: MusicBrainz + iTunes a partir de uma semente artista/título.
@@ -910,8 +905,6 @@ ipcMain.handle('mp3:saveTags', async (_e, payload) => {
   }
 });
 
-// MusicBrainz/iTunes facts -> src/services/metadata-sources.js (🟦)
-// LRCLIB lyrics (get/search/fetchLrclib/PoW) -> src/services/lyrics-lrclib.js (🟦)
 
 ipcMain.handle('lyrics:fetchSynced', async (_e, args = {}) => {
   try {

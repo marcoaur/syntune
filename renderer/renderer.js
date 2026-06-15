@@ -4082,7 +4082,6 @@ function renderEqBands() {
   });
 }
 
-function allEqPresets() { return EQ_BUILTINS.concat(eqPresets); }
 function renderEqPresetOptions() {
   const sel = $('eqPreset');
   sel.innerHTML = '';
