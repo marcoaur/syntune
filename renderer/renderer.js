@@ -2882,6 +2882,12 @@ $('settingsBtn').addEventListener('click', async () => {
   await populateLanguageSelect();
   $('apiKey').value = cfg.apiKey || '';
   $('useAi').checked = cfg.useAi !== false; // padrão: ligado (compat. instalações antigas)
+  // integração CLI: só exibe o switch se o Syntune CLI estiver instalado
+  try {
+    const cli = await window.api.cliDetect();
+    $('cliAiRow').classList.toggle('hidden', !cli.installed);
+    $('useCliAi').checked = cfg.useCliAi === true;
+  } catch { $('cliAiRow').classList.add('hidden'); }
   $('geniusToken').value = cfg.geniusToken || '';
   $('lastfmApiKey').value = cfg.lastfmApiKey || '';
   $('lastfmSecret').value = cfg.lastfmSecret || '';
@@ -2914,6 +2920,29 @@ $('settingsAcc').addEventListener('click', (e) => {
 
 $('lastfmScrobbleEnabled').addEventListener('change', (e) => {
   $('lastfmScrobbleFields').classList.toggle('hidden', !e.target.checked);
+});
+
+// Switch "Usar IA no Syntune CLI?" — ação imediata (não espera o Salvar).
+// Ligar: modal de confirmação informando que a chave irá p/ a var STUNE_API_KEY.
+// Desligar: remove a var. A var é (re)gravada ao salvar a chave, se o switch estiver ligado.
+$('useCliAi').addEventListener('change', async (e) => {
+  const on = e.target.checked;
+  if (on && !confirm(t('settings.cliAiConfirm'))) {
+    e.target.checked = false; // usuário recusou → reverte
+    return;
+  }
+  try {
+    const res = await window.api.cliSetAiEnabled(on);
+    if (on) {
+      // a chave já configurada vira a var agora; senão, será gravada ao salvar a chave
+      toast(res.hasKey ? t('settings.cliAiOnWithKey') : t('settings.cliAiOnNoKey'), 'success');
+    } else {
+      toast(t('settings.cliAiOff'), 'success');
+    }
+  } catch {
+    e.target.checked = !on; // falhou → reverte estado visual
+    toast(t('settings.cliAiError'), 'error');
+  }
 });
 
 $('btnAuthLastfm').addEventListener('click', async () => {

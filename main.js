@@ -288,7 +288,60 @@ ipcMain.handle('config:set', (_e, cfg) => {
   const current = readConfig();
   const merged = { ...current, ...cfg };
   writeConfig(merged);
+  // ao salvar (ex.: a chave Gemini mudou), reconcilia a var de ambiente do CLI
+  reconcileCliKeyVar();
   return merged;
+});
+
+// ---------- CLI: integração de IA (variável de ambiente STUNE_API_KEY) ----------
+// Caminhos onde o stune.cmd pode estar: prod = <INSTDIR>/cli; dev = <repo>/cli.
+function cliCmdPaths() {
+  const list = [];
+  try { list.push(path.join(path.dirname(app.getPath('exe')), 'cli', 'stune.cmd')); } catch { /* ignore */ }
+  try { list.push(path.join(app.getAppPath(), 'cli', 'stune.cmd')); } catch { /* ignore */ }
+  return list;
+}
+function isCliInstalled() {
+  return cliCmdPaths().some((p) => { try { return fs.existsSync(p); } catch { return false; } });
+}
+
+// Grava/remove uma variável de ambiente do USUÁRIO (persistente). Windows: PowerShell
+// [Environment]::SetEnvironmentVariable(...,'User'). O valor vai por env (não interpolado
+// na linha de comando) para evitar injeção. Em não-Windows é no-op (sem persistência padrão).
+function setUserEnvVar(name, value) {
+  return new Promise((resolve) => {
+    if (process.platform !== 'win32') { resolve(false); return; }
+    const { execFile } = require('child_process');
+    const ps = value
+      ? `[Environment]::SetEnvironmentVariable('${name}', $env:__STUNE_VAL, 'User')`
+      : `[Environment]::SetEnvironmentVariable('${name}', $null, 'User')`;
+    execFile('powershell', ['-NoProfile', '-NonInteractive', '-Command', ps],
+      { env: { ...process.env, __STUNE_VAL: value || '' } },
+      (err) => { if (err) console.warn('[cli] falha ao gravar env var:', err.message); resolve(!err); });
+    // reflete no processo atual também (best-effort)
+    if (value) process.env[name] = value; else delete process.env[name];
+  });
+}
+
+// Estado desejado da var: useCliAi ligado E há chave → grava; senão → remove (sem var órfã).
+// Chamado ao virar o switch e ao salvar a config (chave pode ter mudado).
+function reconcileCliKeyVar() {
+  try {
+    const cfg = readConfig(); // inclui apiKey decriptado (secrets.enc)
+    if (cfg.useCliAi === true && cfg.apiKey) return setUserEnvVar('STUNE_API_KEY', cfg.apiKey);
+    return setUserEnvVar('STUNE_API_KEY', '');
+  } catch (err) { console.warn('[cli] reconcile falhou:', err.message); }
+}
+
+ipcMain.handle('cli:detect', () => ({ installed: isCliInstalled() }));
+
+// liga/desliga a integração: persiste useCliAi e reconcilia a var na hora (spec).
+ipcMain.handle('cli:setAiEnabled', async (_e, enabled) => {
+  const cfg = readConfig();
+  cfg.useCliAi = !!enabled;
+  writeConfig(cfg);
+  await reconcileCliKeyVar();
+  return { useCliAi: cfg.useCliAi, hasKey: !!cfg.apiKey, installed: isCliInstalled() };
 });
 
 

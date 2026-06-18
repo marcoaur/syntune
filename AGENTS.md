@@ -69,6 +69,8 @@ src/
   config/
     secrets.js       🟪 CONFIG  cripto em repouso (AES-256-GCM + safeStorage); key por parâmetro     → ver src/config/README.md
     config-store.js  🟪 CONFIG  estado selado + readConfig/writeConfig/getLibraryDir/initSecrets
+  cli/
+    stune.js         🟥 CORE · CLI  Syntune CLI (Node puro, sem Electron): batch download YouTube + playlist
   media/
     id3.js           🟩 MEDIA  read/write ID3v2 rápido, lyrics, LRCLIB_SYNC tag, cover→dataURL   → ver src/media/README.md
   services/
@@ -87,6 +89,8 @@ renderer/
   modules/           ⬜ UTIL   helpers puros ESM (format/color/lrc) extraídos do monolito  → ver renderer/modules/README.md
   styles.css         🟧 UI     tema, componentes, container id-scoped
 scripts/             ⬜ UTIL   build, capture, check-i18n
+build/
+  installer.nsh              NSIS hook: instala/atualiza/remove o CLI opcional
 ```
 
 ## 5. Funcionalidades → onde moram
@@ -112,6 +116,7 @@ scripts/             ⬜ UTIL   build, capture, check-i18n
 | Editor imersivo de letra | `renderer/renderer.js` (`openLyricsEditor`...) | undo/redo, offsets, validação de ordem |
 | Detecção de dispositivos removíveis | `src/devices/device-detection.js` | polling via PowerShell/CIM (só Windows) |
 | Sincronização PC↔dispositivo | `src/devices/sync-controller.js` + `sync-engine.js` + `sync-worker.js` + handlers em `main.js` | serializada por dispositivo |
+| **Syntune CLI (stune)** | `src/cli/stune.js` + `build/installer.nsh` | Node puro (sem Electron); batch download YT + enriquecimento factual + playlist; instalação opcional via NSIS |
 
 ## 6. Regras importantes / o que NÃO pode falhar
 

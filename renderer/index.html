@@ -575,6 +575,14 @@
               <label class="switch"><input id="useAi" type="checkbox" /><span class="track"></span></label>
             </label>
             <span class="hint-text" data-i18n="settings.useAiHint" style="margin-top: -6px; display: block;">Opcional. Sem IA (ou sem chave), o app usa só fontes factuais (MusicBrainz/iTunes/LRCLIB).</span>
+            <!-- Integração CLI: só aparece se o Syntune CLI estiver instalado (toggle imediato) -->
+            <div id="cliAiRow" class="hidden">
+              <label class="field" style="flex-direction: row; align-items: center; justify-content: space-between; margin-top: 4px;">
+                <span class="field-label-row" data-i18n="settings.useCliAi">Usar IA no Syntune CLI?</span>
+                <label class="switch"><input id="useCliAi" type="checkbox" /><span class="track"></span></label>
+              </label>
+              <span class="hint-text" data-i18n="settings.useCliAiHint" style="margin-top: -6px; display: block;">Grava sua chave Gemini na variável de ambiente STUNE_API_KEY para o CLI usar.</span>
+            </div>
             <label class="field">
               <span data-i18n="settings.model">Modelo</span>
               <select id="model" class="input">
