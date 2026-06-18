@@ -1,10 +1,13 @@
 {
   "name": "syntune",
-  "version": "2.3.0",
+  "version": "2.4.0",
   "description": "Organizador e player de música offline: enriquece MP3 com IA + dados musicais abertos e sincroniza a biblioteca com dispositivos portáteis",
   "main": "main.js",
   "author": "Marco",
   "license": "GPL-3.0-only",
+  "bin": {
+    "stune": "src/cli/stune.js"
+  },
   "scripts": {
     "start": "electron .",
     "dist": "electron-builder",
@@ -43,7 +46,8 @@
       "installerIcon": "src/img/icone.ico",
       "uninstallerIcon": "src/img/icone.ico",
       "installerHeaderIcon": "src/img/icone.ico",
-      "artifactName": "Syntune-Setup.exe"
+      "artifactName": "Syntune-Setup.exe",
+      "include": "build/installer.nsh"
     },
     "portable": {
       "artifactName": "Syntune-Portable.exe"
