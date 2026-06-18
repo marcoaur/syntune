@@ -245,12 +245,49 @@ async function fetchFactualCover(c) {
   return null;
 }
 
-// extrai "Artista - Título" de um título de vídeo/arquivo (heurística)
-function parseArtistTitle(s) {
-  const t = (s || '').replace(/\([^)]*\)|\[[^\]]*\]/g, ' ').replace(/\s+/g, ' ').trim();
-  const parts = t.split(/\s[-–—]\s/);
-  if (parts.length >= 2) return { artist: parts[0].trim(), title: parts.slice(1).join(' - ').trim() };
-  return { artist: '', title: t };
+// descritores de vídeo que NÃO fazem parte de artista/título — removidos antes do parse
+// (cobrem os casos "... | Lyric Video", "(Official Video)", "[Clipe Oficial]" etc.)
+const VIDEO_JUNK = /\b(official\s*music\s*video|official\s*video|music\s*video|lyric[s]?\s*video|video\s*lyric[s]?|lyric[s]?|official\s*audio|audio\s*oficial|v[ií]deo\s*oficial|clipe\s*oficial|clipe|visualizer|legendado|official|full\s*hd|hd|hq|4k|mv|m\/v)\b/gi;
+
+// Capitaliza nomes vindos da HEURÍSTICA (título cru do YouTube/arquivo), que vêm
+// em CAIXA ALTA / minúsculas inconsistentes (ex.: "LIVRE ACESS"). NÃO aplicar a
+// nomes vindos das APIs factuais (MusicBrainz/iTunes) nem do Gemini — esses já
+// trazem a grafia correta.
+function titleCase(s) {
+  return String(s || '')
+    .toLocaleLowerCase('pt-BR')
+    .replace(/(^|[\s\-–—|·•/("'’])(\p{L})/gu, (_m, sep, ch) => sep + ch.toLocaleUpperCase('pt-BR'));
+}
+
+// extrai "Artista - Título" de um título de vídeo/arquivo (heurística).
+// channelHint (canal/uploader do YouTube) desambigua a ORDEM quando o separador
+// é ambíguo (ex.: "Faixa | Artista"): o segmento que casa com o canal é o artista.
+function parseArtistTitle(s, channelHint) {
+  const cleaned = String(s || '')
+    .replace(/\([^)]*\)|\[[^\]]*\]|\{[^}]*\}/g, ' ') // remove (...) [...] {...}
+    .replace(VIDEO_JUNK, ' ')                        // remove descritores de vídeo
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  // 1º tenta " - " (padrão Artista - Título); senão | · • (ordem ambígua)
+  let parts = cleaned.split(/\s[-–—]\s/);
+  if (parts.length < 2) parts = cleaned.split(/\s*[|·•]\s*/);
+  parts = parts.map((p) => p.replace(/\s+/g, ' ').trim()).filter(Boolean);
+
+  if (parts.length < 2) return { artist: '', title: titleCase(parts[0] || cleaned) };
+
+  let artist = parts[0];
+  let title = parts.slice(1).join(' - ');
+  // ordem ambígua: se o canal casa com o ÚLTIMO segmento (e não com o 1º), inverte
+  if (channelHint) {
+    const matchFirst = fuzzyMatch(parts[0], channelHint);
+    const matchLast = fuzzyMatch(parts[parts.length - 1], channelHint);
+    if (matchLast && !matchFirst) {
+      artist = parts[parts.length - 1];
+      title = parts.slice(0, -1).join(' - ');
+    }
+  }
+  return { artist: titleCase(artist), title: titleCase(title) };
 }
 
 // monta o bloco de fatos p/ os prompts do Gemini
@@ -270,4 +307,4 @@ function factsBlock(c) {
   ].join('\n');
 }
 
-module.exports = { mbSearchRecordings, mbToMatches, itunesLookup, gatherFacts, consolidateFacts, fetchFactualCover, parseArtistTitle, factsBlock, fuzzyMatch, normName };
+module.exports = { mbSearchRecordings, mbToMatches, itunesLookup, gatherFacts, consolidateFacts, fetchFactualCover, parseArtistTitle, titleCase, factsBlock, fuzzyMatch, normName };

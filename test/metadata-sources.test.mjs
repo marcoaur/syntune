@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  fuzzyMatch, normName, parseArtistTitle, consolidateFacts, factsBlock, mbToMatches
+  fuzzyMatch, normName, parseArtistTitle, titleCase, consolidateFacts, factsBlock, mbToMatches
 } from '../src/services/metadata-sources.js';
 
 test('normName: sem acentos/pontuação, espaços simples', () => {
@@ -21,6 +21,32 @@ test('parseArtistTitle: separa "Artista - Título" e limpa parênteses', () => {
     { artist: 'Band', title: 'Song' });
   assert.deepEqual(parseArtistTitle('Só Um Título'),
     { artist: '', title: 'Só Um Título' });
+});
+
+test('parseArtistTitle: separador "|" + descritor de vídeo', () => {
+  // "Faixa | Lyric Video" → remove o descritor, sobra só o título
+  assert.deepEqual(parseArtistTitle('Tua Igreja Canta | Lyric Video'),
+    { artist: '', title: 'Tua Igreja Canta' });
+  // "Faixa | Artista" sem dica de canal → ordem assumida artista-primeiro (capitalizado)
+  assert.deepEqual(parseArtistTitle('LIVRE ACESS | ADRIAN LOPES'),
+    { artist: 'Livre Acess', title: 'Adrian Lopes' });
+});
+
+test('parseArtistTitle: canal desambigua a ordem (Faixa | Artista)', () => {
+  // o canal "Adrian Lopes" casa com o 2º segmento → ele é o artista
+  assert.deepEqual(parseArtistTitle('LIVRE ACESS | ADRIAN LOPES', 'Adrian Lopes'),
+    { artist: 'Adrian Lopes', title: 'Livre Acess' });
+});
+
+test('titleCase: CAIXA ALTA e minúsculas → Capitalizado (com acento)', () => {
+  assert.equal(titleCase('LIVRE ACESS'), 'Livre Acess');
+  assert.equal(titleCase('adrian lopes'), 'Adrian Lopes');
+  assert.equal(titleCase('CORAÇÃO valente'), 'Coração Valente');
+});
+
+test('parseArtistTitle: capitaliza nomes da heurística', () => {
+  assert.deepEqual(parseArtistTitle('ADRIAN LOPES - LIVRE ACESS'),
+    { artist: 'Adrian Lopes', title: 'Livre Acess' });
 });
 
 test('consolidateFacts: ano = mais antigo entre fontes confiáveis; gênero do iTunes', () => {
