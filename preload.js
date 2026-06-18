@@ -32,6 +32,10 @@ contextBridge.exposeInMainWorld('api', {
   // configuração
   getConfig: () => ipcRenderer.invoke('config:get'),
   setConfig: (cfg) => ipcRenderer.invoke('config:set', cfg),
+
+  // integração com o Syntune CLI
+  cliDetect: () => ipcRenderer.invoke('cli:detect'),
+  cliSetAiEnabled: (enabled) => ipcRenderer.invoke('cli:setAiEnabled', enabled),
   onSecurityWarning: (cb) => ipcRenderer.on('security:plaintextWarning', () => cb()),
 
   // auto-update
