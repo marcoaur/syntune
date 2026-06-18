@@ -315,7 +315,7 @@ async function processTrack(url, index) {
         let seedArtist = (info.artist || info.creator || '').trim();
         let seedTitle = (info.track || '').trim();
         if (!seedArtist || !seedTitle) {
-            const p = parseArtistTitle(info.title);
+            const p = parseArtistTitle(info.title, info.uploader || info.channel || info.creator);
             seedArtist = seedArtist || p.artist;
             seedTitle = seedTitle || p.title;
         }
@@ -358,8 +358,10 @@ async function processTrack(url, index) {
 
         // 4. Salvar tags. IA → usa JSON normalizado do Gemini; senão → modo factual (main.js:551).
         job.status = "Salvando..."; job.progress = 90;
+        // fallback de título sempre limpo (sem "| Lyric Video", "(Official Video)" etc.)
+        const cleanTitle = parseArtistTitle(info.title, info.uploader || info.channel || info.creator).title;
         const finalArtist = (ai && ai.artist) || facts.artist || seed.artist || 'Unknown';
-        const finalTitle = (ai && ai.title) || facts.title || seed.title || info.title || 'Unknown';
+        const finalTitle = (ai && ai.title) || facts.title || seed.title || cleanTitle || info.title || 'Unknown';
         const tags = ai ? {
             title: finalTitle,
             artist: finalArtist,
