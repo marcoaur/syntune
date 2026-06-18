@@ -1203,7 +1203,7 @@ async function startJob(job) {
       try {
         const ly = await window.api.fetchSyncedLyrics({
           artist: data.artist || '',
-          title: data.title || dl.videoTitle || '',
+          title: data.title || dl.cleanName || dl.videoTitle || '',
           album: data.album || '',
           duration: 0
         });
@@ -1218,7 +1218,7 @@ async function startJob(job) {
     updateJobEl(job);
     const suggested = (data.artist && data.title)
       ? `${data.artist} - ${data.title}`
-      : (data.title || dl.videoTitle || 'audio');
+      : (data.title || dl.cleanName || dl.videoTitle || 'audio');
     const save = await window.api.saveTags({
       filePath: dl.filePath,
       source: 'library',

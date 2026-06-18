@@ -366,11 +366,16 @@ ipcMain.handle('youtube:download', async (_e, arg) => {
   // 1) coletar o contexto rico da página (título, canal, descrição, comentários, tags…)
   let ytContext = null;
   let videoTitle = 'audio';
+  let cleanName = '';
   let thumbUrl = '';
   try {
     ytContext = await fetchYouTubeContext(ytDlp, url, (m) => send(m));
     if (ytContext) {
       videoTitle = sanitizeName(ytContext.videoTitle) || 'audio';
+      // nome de fallback já no padrão [Artista] - [Título], sem descritores de vídeo
+      // ("| Lyric Video", "(Official Video)" etc.). Usado quando IA/APIs não casam.
+      const p = parseArtistTitle(ytContext.videoTitle, ytContext.channel);
+      cleanName = (p.artist && p.title) ? `${p.artist} - ${p.title}` : (p.title || videoTitle);
       thumbUrl = ytContext.thumbnail || '';
     }
   } catch {
@@ -429,7 +434,7 @@ ipcMain.handle('youtube:download', async (_e, arg) => {
       return { error: t('main.mp3NotFound') };
     }
     send(t('main.done'), 100);
-    return { filePath: finalPath, videoTitle, source: 'youtube', thumbnailDataUrl, ytContext };
+    return { filePath: finalPath, videoTitle, cleanName: cleanName || videoTitle, source: 'youtube', thumbnailDataUrl, ytContext };
   } catch (err) {
     return { error: t('main.downloadFail', { msg: err.message }) };
   }
@@ -643,7 +648,7 @@ ipcMain.handle('gemini:smartMetadata', async (_e, payload) => {
   let seedArtist = (raw.artist || '').trim() || (ctx.musicArtist || '').trim();
   let seedTitle = (raw.title || '').trim() || (ctx.musicTrack || '').trim();
   if ((!seedArtist || !seedTitle) && ctx.videoTitle) {
-    const p = parseArtistTitle(ctx.videoTitle);
+    const p = parseArtistTitle(ctx.videoTitle, ctx.channel);
     seedArtist = seedArtist || p.artist;
     seedTitle = seedTitle || p.title;
   }

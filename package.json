@@ -1,6 +1,6 @@
 {
   "name": "syntune",
-  "version": "2.4.0",
+  "version": "2.4.1",
   "description": "Organizador e player de música offline: enriquece MP3 com IA + dados musicais abertos e sincroniza a biblioteca com dispositivos portáteis",
   "main": "main.js",
   "author": "Marco",
