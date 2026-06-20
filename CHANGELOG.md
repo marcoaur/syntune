@@ -7,6 +7,43 @@ o projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR/).
 
 ## [Não lançado]
 
+## [2.5.0] — 2026-06-19
+
+### Adicionado
+- **Acordes sincronizados:** músicos podem adicionar acordes cronometrados à música, para
+  outros tocarem junto. O editor de letra ganhou um switch de modo (🎤 letra ↔ clave de Sol
+  acordes); no modo acordes marca-se cada acorde numa **timeline própria** (tap-to-time).
+  Salvos no MP3 em frame ID3 separado (`TXXX:SYNCED_CHORDS`) — não tocam na letra (que segue
+  publicável no LRCLIB). **No karaokê** os acordes aparecem acima de cada linha, distribuídos
+  pelo tempo; uma barra varre a linha ativa e cada acorde **pulsa** ao ser alcançado e decai
+  ao normal. Janela passa a **6 linhas** quando há acordes; também exibe acordes em trechos
+  **instrumentais** (sem letra). Botão dedicado (clave de Sol) liga/desliga a exibição.
+- **Edição inline de acordes (modo edição avançada):** com a flag ligada em Configurações,
+  edita-se os acordes direto no karaokê — **arrastar** para ajustar o tempo (precisão de ms,
+  com hint flutuante e auto-pause), **setas** ←/→ (10/100/1 ms), **Del** apaga, **duplo-clique**
+  cria/renomeia. O botão de acordes faz **morph** para disquete e salva inline. Avisa ao
+  trocar de faixa com edições não salvas.
+- **Cor dos acordes** derivada da paleta da capa — sempre contrastante no fundo escuro e
+  distinta do branco da letra.
+- **Demo semeado offline (primeira impressão):** no 1º run, o app copia uma faixa de exemplo
+  já enriquecida (capa, tags e letra sincronizada) para a biblioteca, mostrando o app
+  **populado e tocando na hora** — sem rede, yt-dlp ou chave de IA. Idempotente (`demoSeeded`),
+  nunca injeta em quem já tem biblioteca; a faixa vive em `assets/demo/` (Creative Commons ou
+  própria). Ao clicá-la, abre direto no modo imersivo + karaokê. Override de teste:
+  `STUNE_FORCE_DEMO=1`.
+
+### Corrigido
+- **Erro de reprodução ao salvar a faixa em reprodução:** salvar tags reescrevia o MP3 sob o
+  stream (`mp3file://`) e a decodificação falhava; a faixa atual passa a ser recarregada
+  preservando a posição.
+- **Layout do karaokê com letra:** o bloco capa+espectro encostava no topo (cortava as barras
+  superiores) e sobrepunha a letra; ajustados o afastamento e a faixa de letra. Altura inicial
+  da janela +60 px.
+
+### Interno
+- Frame ID3 `TXXX:SYNCED_CHORDS` (leitura/escrita) + IPC `chords:get`/`chords:set`; faixa de
+  demonstração entregue em `assets/demo/` (incluída no build).
+
 ## [2.3.0] — 2026-06-15
 
 ### Corrigido

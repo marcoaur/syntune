@@ -70,6 +70,10 @@ contextBridge.exposeInMainWorld('api', {
   lyricsGetSyncStatus: (filePath) => ipcRenderer.invoke('lyrics:getSyncStatus', filePath),
   lyricsSetSyncStatus: (filePath, status) => ipcRenderer.invoke('lyrics:setSyncStatus', { filePath, status }),
 
+  // acordes sincronizados
+  chordsGet: (filePath) => ipcRenderer.invoke('chords:get', filePath),
+  chordsSet: (filePath, chords) => ipcRenderer.invoke('chords:set', { filePath, chords }),
+
   // lastfm
   lastfmGetPlaycount: (payload) => ipcRenderer.invoke('lastfm:getPlaycount', payload),
   lastfmGetArtistInfo: (payload) => ipcRenderer.invoke('lastfm:getArtistInfo', payload),
