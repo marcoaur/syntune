@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <title>Piloto — comparação Vanilla × Atomico × Lit</title>
+  <style>
+    body { background:#0a0a0f; color:#eee; font:14px/1.5 system-ui; margin:0; padding:24px; }
+    h1 { font-size:16px; margin:0 0 4px; }
+    .sub { opacity:.6; font-size:12px; margin-bottom:18px; }
+    .controls { display:flex; align-items:center; gap:14px; margin-bottom:18px;
+                background:#16161d; padding:12px 16px; border-radius:10px; }
+    .controls input[type=range] { flex:1; }
+    button { background:#2a2a36; color:#eee; border:0; border-radius:8px; padding:8px 14px; cursor:pointer; }
+    .grid { display:grid; grid-template-columns:repeat(2,1fr); gap:16px; }
+    .note { margin-top:16px; font-size:12px; opacity:.65; }
+    .col { background:#16161d; border-radius:12px; overflow:hidden; }
+    .col h2 { font-size:13px; margin:0; padding:10px 14px; background:#1d1d27; }
+    .col h2 small { float:right; opacity:.55; font-weight:400; }
+    iframe { width:100%; height:300px; border:0; display:block; background:#0d0d12; }
+  </style>
+</head>
+<body>
+  <h1>Linha de acorde — Vanilla × Atomico × Lit (lado a lado)</h1>
+  <div class="sub">Mesma feature, mesmo contrato (props down / events up). O controle abaixo dirige os três em sincronia.</div>
+
+  <div class="controls">
+    <button id="play">▶ play (todos)</button>
+    <input id="scrub" type="range" min="0" max="12" step="0.02" value="0">
+    <span id="t" style="font:12px ui-monospace; width:54px; text-align:right;">0.00s</span>
+  </div>
+
+  <div class="grid">
+    <div class="col"><h2>Vanilla <small>0 KB · ~84 LoC</small></h2><iframe id="f-van" src="../vanilla/"></iframe></div>
+    <div class="col"><h2>Lit <small>~5–6 KB · 77 LoC</small></h2><iframe id="f-lit" src="../lit/"></iframe></div>
+  </div>
+  <p class="note">Atomico ficou fora da comparação ao vivo: não carrega de forma confiável por CDN
+  (esm.sh) — exige <code>npm i</code> + bundle. Essa fricção de setup já é um ponto contra ele
+  para a contribuição da comunidade. Lit, mesma categoria de peso (~5 KB), carrega liso por CDN.</p>
+
+  <script>
+    const frames = ['f-van', 'f-lit'].map((id) => document.getElementById(id));
+    const scrub = document.getElementById('scrub');
+    const tLabel = document.getElementById('t');
+    const send = (v) => {
+      tLabel.textContent = (+v).toFixed(2) + 's';
+      for (const f of frames) f.contentWindow && f.contentWindow.postMessage({ type: 'current', value: +v }, '*');
+    };
+    scrub.addEventListener('input', () => send(scrub.value));
+    let raf, t0;
+    document.getElementById('play').addEventListener('click', () => {
+      cancelAnimationFrame(raf); t0 = performance.now() - (+scrub.value) * 1000;
+      const tick = (now) => {
+        const cur = Math.min(12, (now - t0) / 1000);
+        scrub.value = cur; send(cur);
+        if (cur < 12) raf = requestAnimationFrame(tick);
+      };
+      raf = requestAnimationFrame(tick);
+    });
+  </script>
+</body>
+</html>
