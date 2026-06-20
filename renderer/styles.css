@@ -1365,6 +1365,8 @@ select.input { cursor: pointer; }
 }
 .np-btn:hover { background: rgba(255, 255, 255, 0.22); }
 .np-btn svg { width: 18px; height: 18px; }
+#npChordsBtn.active { background: rgba(255, 255, 255, 0.30); color: #fff; }
+.np-btn:disabled, .np-btn.disabled { opacity: 0.3; pointer-events: none; cursor: default; }
 
 .np-stage {
   position: absolute; inset: 0; z-index: 1;
@@ -1534,9 +1536,11 @@ select.input { cursor: pointer; }
 
 /* ===== Letra SINCRONIZADA: janela compacta de 5 linhas sobre a visualização ===== */
 /* o palco (capa + anel) continua visível, apenas sobe e encolhe um pouco */
-.now-playing.lyrics-mode.np-synced .np-stage { display: flex; padding-bottom: 50vh; }
+/* padding-top afasta o bloco capa+espectro do topo: sem ele as barras superiores do
+   espectro encostam na borda da janela e são cortadas (modo janela). */
+.now-playing.lyrics-mode.np-synced .np-stage { display: flex; padding-top: 12vh; padding-bottom: 50vh; }
 .now-playing.lyrics-mode.np-synced .np-cover { width: min(30vh, 220px); }
-.now-playing.lyrics-mode.np-synced.idle .np-stage { padding-bottom: 50vh; }
+.now-playing.lyrics-mode.np-synced.idle .np-stage { padding-top: 12vh; padding-bottom: 50vh; }
 .now-playing.lyrics-mode.np-synced.idle .np-cover { transform: scale(1.05); }
 /* em tela cheia: a capa/espectro crescem proporcionalmente à tela (sem ficar minúsculos
    em ultrawide), mas ancoram embaixo — afastados do topo e perto da 1ª linha da letra.
@@ -1563,6 +1567,11 @@ select.input { cursor: pointer; }
   -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 26%, #000 74%, transparent 100%);
           mask-image: linear-gradient(180deg, transparent 0, #000 26%, #000 74%, transparent 100%);
 }
+/* janela: a faixa de letra desce um pouco para não ser coberta pelo bloco capa+espectro
+   (que foi afastado do topo). Em tela cheia o layout é outro — não se aplica. */
+.now-playing:not(.np-fs).lyrics-mode.np-synced .np-lyrics-view.synced {
+  inset: auto 0 clamp(130px, 15vh, 180px) 0;
+}
 /* wrapper das linhas: o JS o desliza via transform (GPU), em vez de rolar o contêiner */
 .np-lyrics-track {
   display: flex; flex-direction: column; align-items: center;
@@ -1581,6 +1590,67 @@ select.input { cursor: pointer; }
 }
 .np-lyrics-view.synced .np-lyric:hover { color: #fff; }
 .np-lyrics-view.synced .np-lyric.active { color: #fff; transform: scale(1.03); }
+
+/* ----- Acordes sincronizados sobre a linha ----- */
+.np-lyrics-view.synced .np-lyric.has-chords { flex-direction: column; gap: 4px; }
+.np-chord-row {
+  position: relative; width: 100%; max-width: 760px;
+  height: 26px; margin: 0 auto;
+}
+/* varredura na BASE da linha (underline) — nunca cruza o texto do acorde.
+   rAF anima a largura quadro a quadro; transition só na opacidade (entra/sai). */
+.np-chord-sweep {
+  position: absolute; left: 0; bottom: 1px;
+  height: 2px; width: 0; border-radius: 2px;
+  background: linear-gradient(90deg, rgba(var(--chord-accent, 255, 255, 255), 0), rgba(var(--chord-accent, 255, 255, 255), 0.55));
+  opacity: 0; transition: opacity 0.25s ease; pointer-events: none; z-index: 1;
+}
+/* ponto-cabeça que avança com o tempo, na base — “encosta” no acorde sem cortá-lo */
+.np-chord-head {
+  position: absolute; bottom: 0; left: 0; width: 5px; height: 5px; border-radius: 50%;
+  transform: translateX(-50%); background: rgb(var(--chord-accent, 255, 255, 255));
+  box-shadow: 0 0 8px 2px rgba(var(--chord-accent, 255, 255, 255), 0.75);
+  opacity: 0; transition: opacity 0.25s ease; pointer-events: none; z-index: 1;
+}
+.np-chord {
+  position: absolute; top: 0; transform: translateX(-50%);
+  font-size: 13px; font-weight: 800; letter-spacing: 0.02em; white-space: nowrap;
+  color: rgba(var(--chord-accent, 255, 255, 255), 0.72); cursor: pointer; z-index: 2;
+  will-change: color, transform; /* cor/brilho/escala animados pelo rAF (decaimento) */
+}
+
+/* com acordes a janela mostra 6 linhas (em vez de 5) → linhas um pouco mais baixas */
+.np-lyrics-view.synced.chords-on .np-lyric { min-height: calc(var(--np-lyr-h) / 6); }
+
+/* linha só de acordes (intro / trecho instrumental sem letra) */
+.np-lyrics-view.synced .np-lyric.np-chord-only {
+  flex-direction: column; justify-content: center;
+}
+.np-lyrics-view.synced .np-lyric.np-chord-only .np-chord-row { height: 26px; }
+.np-lyrics-view.synced .np-lyric.np-chord-only .np-chord { font-size: 15px; }
+
+/* ---- edição inline de acordes (modo edição avançada) ---- */
+.np-lyrics-view.edit-mode .np-chord { cursor: grab; user-select: none; }
+.np-lyrics-view.edit-mode .np-chord.dragging { cursor: grabbing; }
+.np-chord.sel::after {
+  content: ''; position: absolute; left: -6px; right: -6px; top: -4px; bottom: -4px;
+  border: 1.5px solid rgba(255, 255, 255, 0.65); border-radius: 6px; pointer-events: none;
+}
+.np-chord-input {
+  width: 58px; font: inherit; font-size: 13px; font-weight: 800; text-align: center;
+  color: #fff; background: rgba(0, 0, 0, 0.55); border: 1px solid rgba(255, 255, 255, 0.5);
+  border-radius: 5px; outline: none; padding: 0 2px;
+}
+.np-chord-hint {
+  position: fixed; z-index: 200; transform: translate(-50%, -100%);
+  background: rgba(20, 20, 24, 0.92); color: #fff; font-size: 11px; font-variant-numeric: tabular-nums;
+  padding: 3px 7px; border-radius: 6px; pointer-events: none; white-space: nowrap;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+}
+.np-chord-hint.hidden { display: none; }
+/* morph clave → disquete (salvar) */
+#npChordsBtn { transition: transform 0.25s ease, background 0.15s ease; }
+#npChordsBtn.is-save { background: rgba(52, 199, 89, 0.30); transform: scale(1.06); }
 
 /* 3 pontos durante intervalos instrumentais (> 3s) */
 .np-lyrics-view.synced .np-interlude { gap: 11px; cursor: default; }

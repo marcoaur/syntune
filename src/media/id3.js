@@ -78,6 +78,41 @@ function writeLrclibSync(filePath, value) {
   }
 }
 
+// ---------- Acordes sincronizados (TXXX:SYNCED_CHORDS) ----------
+// Sequência de acordes em formato LRC (timeline PRÓPRIA, independente da letra):
+// cada linha é um evento "[mm:ss.xx]Acorde". Fica num frame TXXX separado para não
+// poluir a letra (que continua publicável no LRCLIB).
+const SYNCED_CHORDS_DESC = 'SYNCED_CHORDS';
+
+function readSyncedChords(filePath) {
+  try {
+    const tags = readId3Fast(filePath);
+    const txxx = tags.userDefinedText || [];
+    const arr = Array.isArray(txxx) ? txxx : [txxx];
+    const hit = arr.find((x) => x && x.description === SYNCED_CHORDS_DESC);
+    return hit ? hit.value : '';
+  } catch { return ''; }
+}
+
+function writeSyncedChords(filePath, lrc) {
+  try {
+    const tags = readId3Fast(filePath);
+    const existing = Array.isArray(tags.userDefinedText)
+      ? tags.userDefinedText
+      : (tags.userDefinedText ? [tags.userDefinedText] : []);
+    const others = existing.filter((x) => x && x.description !== SYNCED_CHORDS_DESC);
+    // lrc vazio = remove o frame de acordes (preservando os demais TXXX)
+    const merged = (lrc && String(lrc).trim())
+      ? [...others, { description: SYNCED_CHORDS_DESC, value: String(lrc) }]
+      : others;
+    NodeID3.update({ userDefinedText: merged }, filePath);
+    return true;
+  } catch (err) {
+    console.warn('[writeSyncedChords]', err.message);
+    return false;
+  }
+}
+
 // capa embutida do MP3 como data URL (lazy, sob demanda)
 function coverDataUrl(filePath) {
   if (!filePath || !fs.existsSync(filePath)) return null;
@@ -101,4 +136,4 @@ function imagePreviewDataUrl(imagePath) {
   }
 }
 
-module.exports = { readId3Fast, lyricsText, readLrclibSync, writeLrclibSync, coverDataUrl, imagePreviewDataUrl, LRCLIB_SYNC_DESC };
+module.exports = { readId3Fast, lyricsText, readLrclibSync, writeLrclibSync, readSyncedChords, writeSyncedChords, coverDataUrl, imagePreviewDataUrl, LRCLIB_SYNC_DESC, SYNCED_CHORDS_DESC };

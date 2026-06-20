@@ -18,7 +18,7 @@ const t = i18n.t;
 
 // ---------- Módulos especialistas (migração monolito → módulos) ----------
 // Ver AGENTS.md (badges) e src/**/README.md (mapas de fluxo).
-const { readId3Fast, lyricsText, readLrclibSync, writeLrclibSync, coverDataUrl, imagePreviewDataUrl, LRCLIB_SYNC_DESC } = require('./src/media/id3'); // 🟩 MEDIA
+const { readId3Fast, lyricsText, readLrclibSync, writeLrclibSync, readSyncedChords, writeSyncedChords, coverDataUrl, imagePreviewDataUrl, LRCLIB_SYNC_DESC, SYNCED_CHORDS_DESC } = require('./src/media/id3'); // 🟩 MEDIA
 const { mbSearchRecordings, mbToMatches, itunesLookup, gatherFacts, consolidateFacts, fetchFactualCover, parseArtistTitle, factsBlock, fuzzyMatch, normName } = require('./src/services/metadata-sources'); // 🟦 SERVICE
 const lastfm = require('./src/services/lastfm'); // 🟦 SERVICE
 const createGeminiService = require('./src/services/gemini'); // 🟦 SERVICE (factory-DI)
@@ -46,7 +46,7 @@ function createWindow() {
   closingForReal = false;
   mainWindow = new BrowserWindow({
     width: 720,
-    height: 760,
+    height: 820,
     minWidth: 560,
     minHeight: 520,
     frame: false,                    // sem moldura nativa
@@ -142,6 +142,45 @@ function setupAutoUpdate() {
   setInterval(() => autoUpdater.checkForUpdates().catch(() => {}), 4 * 60 * 60 * 1000);
 }
 
+// ---------- Demo semeado offline (primeira impressão sem rede/chave) ----------
+// No 1º run, copia faixas de exemplo já enriquecidas (capa + tags + letra
+// sincronizada) de assets/demo/ para a biblioteca, para que um novo usuário veja o
+// app POPULADO e tocando na hora — sem depender de download do YouTube, ffmpeg ou
+// chave de IA (o ponto único de falha mais provável num primeiro contato).
+// Idempotente via flag demoSeeded; nunca injeta em quem já tem biblioteca (upgrade).
+function seedDemoLibrary() {
+  try {
+    const cfg = readConfig();
+    // STUNE_FORCE_DEMO=1: ignora os guards e semeia mesmo assim (testar o "uau").
+    const force = !!process.env.STUNE_FORCE_DEMO;
+    if (cfg.demoSeeded && !force) return;
+
+    const libDir = getLibraryDir();
+    // já tem música? trata como usuário estabelecido — marca e não injeta.
+    let existing = [];
+    try { existing = fs.readdirSync(libDir).filter((f) => f.toLowerCase().endsWith('.mp3')); } catch { /* dir novo */ }
+
+    if (existing.length === 0 || force) {
+      const demoDir = path.join(__dirname, 'assets', 'demo');
+      let demos = [];
+      try { demos = fs.readdirSync(demoDir).filter((f) => f.toLowerCase().endsWith('.mp3')); } catch { /* sem assets: no-op */ }
+      let copied = 0;
+      for (const name of demos) {
+        const dest = path.join(libDir, name);
+        if (fs.existsSync(dest)) continue; // já semeada: NÃO duplica (idempotente mesmo com force)
+        try { fs.copyFileSync(path.join(demoDir, name), dest); copied++; }
+        catch (e) { console.warn('[seedDemo] cópia falhou:', name, e.message); }
+      }
+      if (copied) console.log(`[seedDemo] ${copied} faixa(s) de demonstração semeada(s).`);
+    }
+
+    cfg.demoSeeded = true; // marca mesmo sem arquivos: não re-tenta a cada boot
+    writeConfig(cfg);
+  } catch (err) {
+    console.warn('[seedDemo] falhou:', err.message);
+  }
+}
+
 app.whenReady().then(() => {
   // Streaming de áudio com suporte a Range (HTTP 206): essencial para o seek —
   // sem ele o Chromium não consegue reposicionar e a reprodução volta ao início.
@@ -203,6 +242,7 @@ app.whenReady().then(() => {
   // locale do sistema com um arquivo em locales/ (fallback: inglês)
   i18n.init({ locale: app.getLocale(), readConfig, writeConfig });
   loadGeminiUsage(); // restaura a contagem diária (RPD) do config.json
+  seedDemoLibrary();  // 1º run: popula a biblioteca com a faixa de demonstração
   createWindow();
   devices.startPolling(); // monitora armazenamentos removíveis (MP4/pendrive)
   setupAutoUpdate();    // busca atualizações nas releases do GitHub
@@ -508,6 +548,7 @@ ipcMain.handle('mp3:readTags', (_e, filePath) => {
     publisher: tags.publisher || '',
     comment: tags.comment && tags.comment.text ? tags.comment.text : '',
     lyrics: lyricsText(tags),
+    chords: readSyncedChords(filePath),
     hasCover: !!tags.image
   };
   return out;
@@ -524,6 +565,18 @@ ipcMain.handle('lyrics:setSyncStatus', (_e, { filePath, status }) => {
   if (!filePath || !fs.existsSync(filePath)) return { error: t('main.fileNotFound') };
   writeLrclibSync(filePath, status);
   return { ok: true };
+});
+
+// ---------- IPC: acordes sincronizados (TXXX:SYNCED_CHORDS) ----------
+ipcMain.handle('chords:get', (_e, filePath) => {
+  if (!filePath || !fs.existsSync(filePath)) return { chords: '' };
+  return { chords: readSyncedChords(filePath) };
+});
+
+ipcMain.handle('chords:set', (_e, { filePath, chords } = {}) => {
+  if (!filePath || !fs.existsSync(filePath)) return { error: t('main.fileNotFound') };
+  const ok = writeSyncedChords(filePath, chords || '');
+  return ok ? { success: true } : { error: t('main.tagsWriteFail') };
 });
 
 // ---------- IPC: listar a biblioteca (varre a pasta de músicas) ----------
@@ -904,13 +957,22 @@ ipcMain.handle('mp3:saveTags', async (_e, payload) => {
       return Array.isArray(arr) ? arr : [arr];
     } catch { return []; }
   })();
+  // Aplica mudanças nos frames TXXX (LRCLIB_SYNC e SYNCED_CHORDS), preservando os demais.
+  let txxx = existingTxxx.slice();
+  let txxxTouched = false;
   if (fields.lrclibSync !== undefined && fields.lrclibSync !== null) {
-    const others = existingTxxx.filter((x) => x && x.description !== LRCLIB_SYNC_DESC);
-    tags.userDefinedText = [...others, { description: LRCLIB_SYNC_DESC, value: fields.lrclibSync }];
-  } else {
-    // preserva sem alterar
-    if (existingTxxx.length) tags.userDefinedText = existingTxxx;
+    txxx = txxx.filter((x) => x && x.description !== LRCLIB_SYNC_DESC);
+    txxx.push({ description: LRCLIB_SYNC_DESC, value: fields.lrclibSync });
+    txxxTouched = true;
   }
+  if (fields.chords !== undefined) {
+    txxx = txxx.filter((x) => x && x.description !== SYNCED_CHORDS_DESC);
+    if (fields.chords && String(fields.chords).trim()) {
+      txxx.push({ description: SYNCED_CHORDS_DESC, value: String(fields.chords) });
+    }
+    txxxTouched = true;
+  }
+  if (txxxTouched || existingTxxx.length) tags.userDefinedText = txxx;
 
   // capa: prioriza a imagem enquadrada (data URL vinda do recorte); senão, caminho local
   let coverBuffer = null;
