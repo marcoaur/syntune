@@ -87,7 +87,7 @@ function coverUrl(s) {
 // ====================== Atalhos DOM ======================
 const $ = (id) => document.getElementById(id);
 const fields = ['title', 'artist', 'album', 'albumArtist', 'composer', 'year',
-  'genre', 'trackNumber', 'partOfSet', 'publisher', 'comment', 'lyrics'];
+  'genre', 'trackNumber', 'partOfSet', 'publisher', 'comment', 'lyrics', 'chords'];
 
 // chave de identidade da faixa (espelha syncKey do main): nome|artista|ano
 
@@ -322,6 +322,11 @@ function matchesQuery(s, terms) {
   return terms.every((t) => hay.includes(t));
 }
 function artistKeyOf(s) { return (s.artist || '').trim() || t('library.noArtist'); }
+
+// Faixa de demonstração semeada (artista "Syntune" + álbum "Demo") — contrato com o
+// asset em assets/demo/. Ao clicá-la, o app abre direto no modo imersivo + karaokê
+// (o "primeiro uau"). Some quando o usuário a substitui/apaga.
+function isDemoTrack(s) { return !!s && s.artist === 'Syntune' && s.album === 'Demo'; }
 
 function renderList() {
   const list = $('songList');
@@ -968,6 +973,7 @@ function buildSongCard(s, queueList) {
     else {
       spawnPlayBurst(card); // onda de cor a partir do card
       playFromCard(s, queueList);
+      if (isDemoTrack(s)) revealDemoImmersive(); // demo: vai direto pro modo imersivo
     }
   });
   if (current && current.filePath === s.filePath) {
@@ -1827,7 +1833,12 @@ $('lmClearBtn').addEventListener('click', async () => {
 });
 
 // --- Estado interno do editor ---
-let leLines = [];   // [{ time: '00:12.45', text: 'verso...' }, ...]
+let leLines = [];   // [{ time: '00:12.45', text: 'verso...' }, ...] — buffer ATIVO
+// Modo do editor: 'lyrics' (letra) ou 'chords' (acordes). Acordes usam a MESMA
+// estrutura {time,text} (text = acorde), em timeline independente, salvos no frame
+// TXXX:SYNCED_CHORDS. leLines aponta para o buffer do modo atual.
+let leMode = 'lyrics';
+let leBuf = { lyrics: [], chords: [] };
 let leFocusIdx = 0;
 let leRafId = null; // rAF handle do loop de destaque em tempo real
 let lePlayerWasHidden = false; // estado do player antes de abrir o editor
@@ -1931,19 +1942,53 @@ function leSeekToLine(i) {
 
 
 
+// --- Alternância de modo letra ↔ acordes ---
+// Ícone reflete o MODO ATUAL: 🎤 microfone (letra) · clave de Sol (acordes).
+const LE_ICON_MIC = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/></svg>';
+const LE_ICON_CLEF = '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M13.1 2c-1.7 0-2.9 1.5-2.9 3.4 0 1 .2 2 .5 3.1-2 1.6-3.2 3.4-3.2 5.6 0 2.6 1.9 4.6 4.5 4.6.4 0 .8 0 1.2-.1l.3 2.1c.2 1.4-.5 2.2-1.6 2.2-.8 0-1.4-.4-1.6-1 .6-.1 1-.6 1-1.2 0-.7-.6-1.3-1.3-1.3-.8 0-1.4.6-1.4 1.5 0 1.5 1.3 2.6 3.2 2.6 1.9 0 3.2-1.3 2.9-3.3l-.3-2.2c1.6-.6 2.6-2 2.6-3.6 0-1.8-1.3-3.2-3.1-3.2-.3 0-.5 0-.8.1l-.4-2.6c1.1-1.1 1.8-2.3 1.8-3.8C14.9 3.2 14.1 2 13.1 2zm-.2 1.3c.5 0 .8.6.8 1.4 0 .9-.4 1.8-1.1 2.6-.2-.8-.4-1.6-.4-2.3 0-1 .3-1.7.7-1.7zm.6 7.8c1.1 0 1.9.9 1.9 2.1 0 1-.6 1.9-1.6 2.3l-.6-4.3c.1 0 .2-.1.3-.1zm-1.5.4l.6 4.4c-.2 0-.5.1-.7.1-1.8 0-3.1-1.4-3.1-3.2 0-1.4.8-2.6 2.1-3.6.2.8.6 1.5 1 2.3z"/></svg>';
+
+function applyLeMode() {
+  const inChords = leMode === 'chords';
+  const btn = $('leModeBtn');
+  if (btn) {
+    btn.innerHTML = inChords ? LE_ICON_CLEF : LE_ICON_MIC;
+    btn.title = t(inChords ? 'chords.editor.modeChords' : 'chords.editor.modeLyrics');
+    btn.classList.toggle('le-mode-active', inChords);
+  }
+  const colText = document.querySelector('.le-col-text-h');
+  if (colText) colText.textContent = inChords ? t('chords.editor.colChord') : t('lyrics.editor.colText');
+  const modal = $('lyricsEditorModal');
+  if (modal) modal.classList.toggle('chords-mode', inChords);
+}
+
+function leSwitchMode() {
+  leBuf[leMode] = leLines;                 // captura o estado atual (cobre reatribuições do undo)
+  leMode = leMode === 'lyrics' ? 'chords' : 'lyrics';
+  leLines = leBuf[leMode];
+  leFocusIdx = 0; leLastActiveIdx = -1;
+  leUndo = []; leRedo = [];                 // histórico de undo é por-modo
+  if (leCoalesceTimer) { clearTimeout(leCoalesceTimer); leCoalesceTimer = null; }
+  applyLeMode();
+  renderAllLines();
+}
+
 // --- Abrir o editor ---
 function openLyricsEditor() {
   const modal = $('lyricsEditorModal');
   $('leTitle').textContent = $('title').value.trim() || '—';
   $('leArtist').textContent = $('artist').value.trim() || '—';
 
-  leLines = parseLyricsToLines($('lyrics').value.trim());
+  leBuf.lyrics = parseLyricsToLines($('lyrics').value.trim());
+  leBuf.chords = parseLyricsToLines($('chords').value.trim());
+  leMode = 'lyrics';
+  leLines = leBuf.lyrics;
   leFocusIdx = 0;
   leLastActiveIdx = -1;
   leUndo = []; leRedo = [];
   if (leCoalesceTimer) { clearTimeout(leCoalesceTimer); leCoalesceTimer = null; }
   leDirty = false;
   leRate = 1; audio.playbackRate = 1; updateSpeedBtn();
+  applyLeMode();
   renderAllLines();
   modal.classList.remove('hidden');
 
@@ -2210,7 +2255,9 @@ function createRow(i) {
   textInp.className = 'le-text';
   textInp.rows = 1;
   textInp.value = line.text;
-  textInp.placeholder = i === 0 ? 'Digite o primeiro verso da letra…' : '';
+  textInp.placeholder = leMode === 'chords'
+    ? t('chords.editor.placeholder')
+    : (i === 0 ? 'Digite o primeiro verso da letra…' : '');
   textInp.spellcheck = true;
 
   textInp.addEventListener('input', () => {
@@ -2486,6 +2533,9 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
+// Alternar modo letra ↔ acordes
+$('leModeBtn').addEventListener('click', leSwitchMode);
+
 // Salvar localmente (sem publicar)
 $('leSaveBtn').addEventListener('click', async () => {
   const btn = $('leSaveBtn');
@@ -2493,8 +2543,11 @@ $('leSaveBtn').addEventListener('click', async () => {
   btn.disabled = true;
   btn.innerHTML = '<span style="display:inline-flex;align-items:center;gap:6px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="le-spin"><circle cx="12" cy="12" r="10" stroke-dasharray="40" stroke-dashoffset="10"/></svg>' + t('lyrics.editor.saving') + '</span>';
 
-  const syncedLyrics = serializeLines(leLines);
+  // captura o buffer ativo e serializa AMBOS os modos para seus campos
+  leBuf[leMode] = leLines;
+  const syncedLyrics = serializeLines(leBuf.lyrics);
   $('lyrics').value = syncedLyrics;
+  $('chords').value = serializeLines(leBuf.chords);
 
   // Se a letra estava 'synced' e o usuário editou, quebra a sincronia → 'local'
   // Se estava 'empty'/'not_found', agora tem letra → 'local'
@@ -2537,6 +2590,8 @@ async function saveDetails() {
   }
   showLoading(t('editor.savingTags'));
   await paint();
+  // a faixa tocando será reescrita in-place → suprime o erro transitório do stream
+  if (current && current.filePath === currentFilePath) audioReloading = true;
   let res;
   try {
     res = await window.api.saveTags(payload);
@@ -2566,7 +2621,7 @@ async function saveDetails() {
     if (updated) currentEditorSong = updated;
   }
   // se a faixa editada é a que está tocando, recarrega o karaokê
-  if (current && current.filePath === currentFilePath) { npLyricsPath = null; loadCurrentLyrics(current.filePath); }
+  if (current && current.filePath === currentFilePath) { npLyricsPath = null; loadCurrentLyrics(current.filePath); reloadCurrentAudio(); }
   renderEditorView();
   $('editor').classList.remove('edit-mode');
   $('editor').classList.add('view-mode');
@@ -2585,6 +2640,8 @@ async function saveDetailsWithSync(lrclibSync) {
   fields.forEach((f) => { payload.fields[f] = $(f) ? $(f).value.trim() : ''; });
   payload.fields.lrclibSync = lrclibSync;
 
+  // a faixa tocando será reescrita in-place → suprime o erro transitório do stream
+  if (current && current.filePath === currentFilePath) audioReloading = true;
   try {
     const res = await window.api.saveTags(payload);
     if (res && res.error) console.warn('[saveDetailsWithSync]', res.error);
@@ -2596,7 +2653,7 @@ async function saveDetailsWithSync(lrclibSync) {
   coverState.delete(currentFilePath); // capa pode ter mudado
   await reloadLibrary();
   maybeResync();
-  if (current && current.filePath === currentFilePath) { npLyricsPath = null; loadCurrentLyrics(current.filePath); }
+  if (current && current.filePath === currentFilePath) { npLyricsPath = null; loadCurrentLyrics(current.filePath); reloadCurrentAudio(); }
 }
 
 $('editDone').addEventListener('click', saveDetails);
@@ -2882,6 +2939,7 @@ $('settingsBtn').addEventListener('click', async () => {
   await populateLanguageSelect();
   $('apiKey').value = cfg.apiKey || '';
   $('useAi').checked = cfg.useAi !== false; // padrão: ligado (compat. instalações antigas)
+  $('advancedEdit').checked = cfg.advancedEdit === true; // padrão: desligado
   // integração CLI: só exibe o switch se o Syntune CLI estiver instalado
   try {
     const cli = await window.api.cliDetect();
@@ -2969,6 +3027,7 @@ $('saveSettings').addEventListener('click', async () => {
   await window.api.setConfig({
     apiKey: $('apiKey').value.trim(),
     useAi: $('useAi').checked,
+    advancedEdit: $('advancedEdit').checked,
     geniusToken,
     lastfmApiKey,
     lastfmSecret: $('lastfmSecret').value.trim(),
@@ -2982,6 +3041,11 @@ $('saveSettings').addEventListener('click', async () => {
   if (langSel !== langConfigured) {
     await window.api.setLanguage(langSel === 'auto' ? '' : langSel);
     return;
+  }
+  advancedEdit = $('advancedEdit').checked; // reflete na sessão imediatamente
+  if (npOpen()) {
+    if ($('nowPlaying').classList.contains('lyrics-mode')) renderNpLyrics(); // aplica/remove gutters
+    updateChordsBtn();
   }
   closeViewAnimated(modal);
   toast(t('settings.saved'), 'success');
@@ -3015,6 +3079,7 @@ function applyPlayerIcons() {
   // Now Playing
   $('npCollapse').innerHTML = ICONS.chevronDown;
   $('npLyricsBtn').innerHTML = ICONS.lyrics;
+  $('npChordsBtn').innerHTML = LE_ICON_CLEF;
   $('npFullscreen').innerHTML = ICONS.maximize;
   $('npQueueBtn').innerHTML = ICONS.queue;
   $('npEqBtn').innerHTML = ICONS.eq;
@@ -3233,6 +3298,10 @@ async function applyNowColor(dataUrl) {
   s.setProperty('--now-g', String(g));
   s.setProperty('--now-b', String(b));
   barTargetPal = { r, g, b, text: pal ? pal.text : '#ffffff' };
+  // a paleta chega async: atualiza o accent dos acordes sem re-render (o rAF o consome)
+  npChordAccent = chordAccentRGB(barTargetPal);
+  const lyBox = $('npLyrics');
+  if (lyBox) lyBox.style.setProperty('--chord-accent', npChordAccent.join(','));
 }
 
 function updatePlayButton() {
@@ -3253,8 +3322,39 @@ async function loadAndPlay(song) {
   return true;
 }
 
+// Recarrega a faixa atual preservando posição/estado. Necessário após salvar tags na
+// faixa que está TOCANDO: saveTags reescreve o MP3 in-place e os offsets do arquivo
+// mudam (sobretudo ao adicionar acordes/letra), o que faz o stream ao vivo via
+// mp3file:// falhar a decodificação ("erro de reprodução"). O ?v= força o refetch.
+function reloadCurrentAudio() {
+  if (!current) return;
+  const pos = audio.currentTime || 0;
+  const wasPlaying = !audio.paused;
+  audioReloading = true;
+  const done = () => { audioReloading = false; };
+  const onMeta = () => {
+    audio.removeEventListener('loadedmetadata', onMeta);
+    try { audio.currentTime = pos; } catch { /* ignora */ }
+    if (wasPlaying) audio.play().catch(() => {});
+    done();
+  };
+  audio.addEventListener('loadedmetadata', onMeta);
+  setTimeout(done, 4000); // segurança: nunca deixa o erro suprimido para sempre
+  audio.src = 'mp3file://' + encodeURIComponent(current.filePath) + '?v=' + Date.now();
+}
+
+// Avisa antes de trocar de faixa com edições de acordes não salvas. Retorna false
+// (abortar) se o usuário cancelar; true caso contrário (sem edições, mesma faixa, ou OK).
+function confirmChordSwitch(index) {
+  if (!npChordsDirty) return true;
+  const next = queue[index];
+  if (!next || (current && next.filePath === current.filePath)) return true;
+  return window.confirm(t('chords.confirmDiscard'));
+}
+
 async function playAt(index) {
   if (index < 0 || index >= queue.length) return;
+  if (!confirmChordSwitch(index)) return; // edições de acordes não salvas: usuário cancelou
   queueIndex = index;
   current = queue[index];
   $('player').classList.remove('hidden', 'closing');
@@ -3355,7 +3455,11 @@ function playPrev() {
 // ---- Eventos do elemento de áudio ----
 audio.addEventListener('play', () => { isPlaying = true; updatePlayButton(); markPlayingCards(); syncNpViz(); syncPlViz(); });
 audio.addEventListener('pause', () => { isPlaying = false; updatePlayButton(); markPlayingCards(); syncNpViz(); syncPlViz(); });
-audio.addEventListener('ended', () => playNext());
+audio.addEventListener('ended', () => {
+  // com acordes não salvos, não avança automaticamente (preservaria as edições): pausa e avisa
+  if (npChordsDirty) { toast(t('chords.unsaved'), ''); isPlaying = false; updatePlayButton(); markPlayingCards(); return; }
+  playNext();
+});
 audio.addEventListener('timeupdate', () => {
   if (audio.duration) {
     if (!window.currentScrobbled && (audio.currentTime > audio.duration / 2 || audio.currentTime > 240)) {
@@ -3380,8 +3484,10 @@ audio.addEventListener('loadedmetadata', () => {
   updateDurLabel();
   rangeFill($('seek')); rangeFill($('npSeek'));
 });
+// Ignora o erro transitório enquanto a faixa tocando é reescrita+recarregada (save).
+let audioReloading = false;
 audio.addEventListener('error', () => {
-  if (current) toast(t('player.playbackError'), 'error');
+  if (current && !audioReloading) toast(t('player.playbackError'), 'error');
 });
 
 // ---- Controles (espelhados entre o mini-player e a Now Playing) ----
@@ -3564,8 +3670,27 @@ function openNowPlaying() {
   rangeFill($('npSeek')); rangeFill($('npVol'));
   syncNpViz();
   if ($('nowPlaying').classList.contains('lyrics-mode')) { npLastCenter = null; npLyricCurTop = null; updateKaraoke(audio.currentTime); }
+  updateChordsBtn();
   syncLyricScroll();
   npScheduleIdle(); // começa a contar para o modo imersivo
+}
+// Abre o modo imersivo já em karaokê para a faixa de demonstração — concentra o
+// "uau" (ambiente colorido + letra sincronizada) num clique, sem o usuário caçar botões.
+// Pequeno atraso deixa a onda de cor do card aparecer antes do imersivo deslizar.
+function revealDemoImmersive() {
+  setTimeout(() => {
+    if (!current || !isDemoTrack(current)) return; // trocou de faixa nesse meio-tempo
+    openNowPlaying();
+    const np = $('nowPlaying');
+    if (!np.classList.contains('lyrics-mode')) {
+      np.classList.add('lyrics-mode');
+      $('npLyricsBtn').classList.add('active');
+      npShowChords = false; // entra no karaokê sem acordes
+      renderNpLyrics(); npLastCenter = null; npLyricCurTop = null; updateKaraoke(audio.currentTime);
+      updateChordsBtn();
+      syncLyricScroll();
+    }
+  }, 260);
 }
 function closeNowPlaying() {
   closeViewAnimated($('nowPlaying'));
@@ -3734,6 +3859,14 @@ function syncNpViz() {
 // ====================== Letra / Karaokê ======================
 const KARAOKE_GAP_MIN = 3; // intro (s): se a 1ª linha demora mais que isso, mostra os 3 pontos
 let npLyricsLines = null;   // [{ t, text }] quando sincronizada; senão null
+let npChordsLines = [];     // [{ t, text }] acordes sincronizados (timeline própria)
+let npLyricSlots = 5;       // linhas visíveis na janela do karaokê (6 quando há acordes)
+let npShowChords = false;       // acordes começam OCULTOS; usuário ativa no botão (só faixas com acordes)
+let advancedEdit = false;       // Settings: habilita edição inline de acordes no karaokê
+let npChordsDirty = false;      // há edições de acordes não salvas (botão vira disquete)
+let npSelChordEl = null;        // acorde selecionado (setas/Del)
+let npChordHintTimer = null;    // timer p/ esconder o hint de timestamp
+let npChordAccent = [150, 130, 255]; // cor dos acordes (destaque da capa, contrasta no escuro)
 let npLyricsPlain = '';     // letra em texto puro (sem sincronia)
 let npLyricsPath = null;    // arquivo cujas letras estão carregadas
 let npLastCenter = null;
@@ -3746,15 +3879,96 @@ let npLyricMaxTop = 0;      // limite inferior da rolagem
 
 // carrega a letra da faixa atual (lê a tag) e prepara o karaokê
 async function loadCurrentLyrics(filePath) {
-  if (!filePath) { npLyricsLines = null; npLyricsPlain = ''; npLyricsPath = null; renderNpLyrics(); return; }
+  if (!filePath) { npLyricsLines = null; npChordsLines = []; npLyricsPlain = ''; npLyricsPath = null; renderNpLyrics(); return; }
   if (npLyricsPath === filePath) return;
   npLyricsPath = filePath;
-  let lyr = '';
-  try { const tags = await window.api.readTags(filePath); lyr = (tags && tags.lyrics) || ''; } catch { /* sem letra */ }
+  let lyr = '', chordsRaw = '';
+  try { const tags = await window.api.readTags(filePath); lyr = (tags && tags.lyrics) || ''; chordsRaw = (tags && tags.chords) || ''; } catch { /* sem letra */ }
   if (npLyricsPath !== filePath) return; // trocou de faixa enquanto lia
   if (isSyncedLyrics(lyr)) { npLyricsLines = parseLrc(lyr); npLyricsPlain = ''; }
   else { npLyricsLines = null; npLyricsPlain = lyr; }
+  npChordsLines = parseLrc(chordsRaw) || [];
+  npChordsDirty = false; npSelChordEl = null; // estado de edição zera ao trocar de faixa
   renderNpLyrics();
+}
+
+// Recuo lateral (px) da faixa útil de acordes: garante que acordes em f=0 e f=1 fiquem
+// visíveis (sem clipping) SEM clampar a posição — o que quebraria a coincidência
+// barra↔acorde. Acorde e barra usam EXATAMENTE o mesmo mapa, então a barra encosta no
+// acorde no instante c.t (independente de `end`). chordX(f) = inset + f·(W − 2·inset).
+const CHORD_INSET = 28;
+const CHORD_GLOW_DECAY = 1.6; // s: tempo até o acorde voltar ao estado dim após ser alcançado
+function chordSpanFromFraction(f) {
+  return `calc(${CHORD_INSET}px + ${f} * (100% - ${2 * CHORD_INSET}px))`;
+}
+
+// Cor de destaque dos acordes a partir da paleta da capa: mantém o MATIZ da capa, força
+// saturação alta e luminosidade ~0.66 → sempre claro o bastante p/ contrastar no fundo
+// escuro e claramente distinta do branco da letra. Capa acinzentada → roxo padrão do app.
+function chordAccentRGB(pal) {
+  if (!pal) return [150, 130, 255];
+  const { h, s } = rgbToHsl(pal.r, pal.g, pal.b);
+  if (s < 0.12) return [150, 130, 255];
+  return hslToRgb(h, Math.min(1, Math.max(0.55, s + 0.10)), 0.66);
+}
+
+// Constrói uma linha de acordes posicionados horizontalmente pelo tempo dentro de
+// [start, end]. A varredura (underline) e o ponto-cabeça ficam na BASE da linha — não
+// cruzam o texto do acorde. Devolve { row, sweepEl, headEl, chords:[{t,el}] }.
+function makeChordRow(list, start, end) {
+  const row = document.createElement('div');
+  row.className = 'np-chord-row';
+  const sweep = document.createElement('div');
+  sweep.className = 'np-chord-sweep';
+  const head = document.createElement('div');
+  head.className = 'np-chord-head';
+  row.appendChild(sweep);
+  row.appendChild(head);
+  const span2 = Math.max(0.1, end - start);
+  const chs = [];
+  for (const c of list) {
+    const span = document.createElement('span');
+    span.className = 'np-chord';
+    span.textContent = c.text;
+    const f = Math.min(1, Math.max(0, (c.t - start) / span2));
+    span.style.left = chordSpanFromFraction(f);
+    span._src = c; // referência ao objeto em npChordsLines (edição inline)
+    span.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (chordEditActive()) { selectChord(span); return; } // edição: clique seleciona, não busca
+      audio.currentTime = c.t + 0.02; if (audio.paused) audio.play(); updateKaraoke();
+    });
+    row.appendChild(span);
+    chs.push({ src: c, el: span });
+  }
+  return { row, sweepEl: sweep, headEl: head, chords: chs };
+}
+
+const DISK_ICON = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>';
+
+// Estado do botão de acordes: ESCONDIDO quando a faixa não tem acordes; visível mas
+// DESABILITADO fora do modo karaokê; "ativo" quando exibindo. Com edições não salvas
+// faz MORPH para disquete (salvar).
+function updateChordsBtn() {
+  const btn = $('npChordsBtn');
+  if (!btn) return;
+  const trackHasChords = (npChordsLines || []).some((c) => c.text);
+  const karaoke = $('nowPlaying').classList.contains('lyrics-mode');
+  if (npChordsDirty) {
+    btn.classList.remove('hidden', 'disabled');
+    btn.disabled = false;
+    btn.classList.add('active', 'is-save');
+    btn.innerHTML = DISK_ICON;
+    btn.title = t('common.save');
+  } else {
+    btn.classList.toggle('hidden', !trackHasChords);
+    btn.disabled = !karaoke;
+    btn.classList.toggle('disabled', !karaoke);
+    btn.classList.toggle('active', trackHasChords && karaoke && npShowChords);
+    btn.classList.remove('is-save');
+    btn.innerHTML = LE_ICON_CLEF;
+    btn.title = t('player.chords');
+  }
 }
 
 function renderNpLyrics() {
@@ -3762,41 +3976,121 @@ function renderNpLyrics() {
   if (!box) return;
   box.innerHTML = '';
   npLastCenter = null; npLyricAnchors = []; npLyricTrack = null; npLyricLastTop = -1;
+  npSelChordEl = null; // os elementos são recriados; evita referência a acorde destacado órfão
   const synced = !!(npLyricsLines && npLyricsLines.length);
-  box.classList.toggle('synced', synced);
-  $('nowPlaying').classList.toggle('np-synced', synced);
+  const allChords = (npChordsLines || []).filter((c) => c.text);
+  const trackHasChords = allChords.length > 0;
+  const hasChords = trackHasChords && npShowChords; // toggle: usuário pode ocultar
+  const chords = hasChords ? allChords : [];
+  updateChordsBtn(); // visibilidade (tem acordes?) + habilitação (modo karaokê?)
+  // janela: 6 linhas quando há acordes (2 passadas · 2 em evidência · 2 próximas), senão 5
+  npLyricSlots = hasChords ? 6 : 5;
+
+  const showTrack = synced || hasChords;
+  box.classList.toggle('synced', showTrack);
+  box.classList.toggle('chords-on', hasChords);
+  box.classList.toggle('edit-mode', advancedEdit && hasChords);
+  $('nowPlaying').classList.toggle('np-synced', showTrack);
+  // cor de destaque dos acordes derivada da capa (var CSS p/ acordes, varredura e cabeça)
+  npChordAccent = chordAccentRGB(barTargetPal);
+  box.style.setProperty('--chord-accent', npChordAccent.join(','));
 
   if (synced) {
-    // janela de 5 linhas: só as linhas com texto entram (linhas vazias do LRC viram pausa)
+    // só as linhas com texto entram (linhas vazias do LRC viram pausa)
     const vis = npLyricsLines.filter((l) => l.text);
     const track = document.createElement('div');
     track.className = 'np-lyrics-track';
     track.style.transform = 'translate3d(0,0,0)';
     npLyricTrack = track;
 
-    const addInterlude = (t0, g0, g1) => {
+    // introdução: acordes antes da 1ª linha ganham linha PRÓPRIA (corrige o empilhamento
+    // à esquerda); sem acordes, 3 pontos quando a 1ª linha demora > 3s.
+    const introChords = (hasChords && vis.length) ? chords.filter((c) => c.t < vis[0].t - 0.001) : [];
+    if (vis.length && introChords.length) {
+      const el = document.createElement('div');
+      el.className = 'np-lyric np-chord-only';
+      const cr = makeChordRow(introChords, 0, vis[0].t);
+      el.appendChild(cr.row);
+      track.appendChild(el);
+      const a0 = { t: 0, el, start: 0, end: vis[0].t, sweepEl: cr.sweepEl, headEl: cr.headEl, chords: cr.chords };
+      cr.chords.forEach((cc) => { cc.el._anchor = a0; });
+      cr.row._anchor = a0;
+      npLyricAnchors.push(a0);
+    } else if (vis.length && vis[0].t > KARAOKE_GAP_MIN) {
       const ig = document.createElement('div');
       ig.className = 'np-lyric np-interlude';
       ig.innerHTML = '<i></i><i></i><i></i>';
       track.appendChild(ig);
-      npLyricAnchors.push({ t: t0, el: ig, dots: ig.querySelectorAll('i'), g0, g1 });
-    };
+      npLyricAnchors.push({ t: 0, el: ig, dots: ig.querySelectorAll('i'), g0: 0, g1: vis[0].t });
+    }
 
-    // introdução: se a 1ª linha demora > 3s, 3 pontos no centro até ela começar
-    if (vis.length && vis[0].t > KARAOKE_GAP_MIN) addInterlude(0, 0, vis[0].t);
-
-    // (sem pontos no meio da música: não dá para saber quando o verso termina de ser
-    //  cantado, e a linha precisa continuar em foco até lá)
-    vis.forEach((ln) => {
+    vis.forEach((ln, idx) => {
       const el = document.createElement('div');
       el.className = 'np-lyric';
-      el.textContent = ln.text;
       el.addEventListener('click', () => { audio.currentTime = ln.t + 0.02; if (audio.paused) audio.play(); updateKaraoke(); });
+
+      const start = ln.t;
+      const nextStart = (idx + 1 < vis.length) ? vis[idx + 1].t : Infinity;
+      // acordes deste intervalo (intro já tratada) — fronteiras de LETRA, estáveis
+      const bucket = hasChords ? chords.filter((c) => c.t >= start - 0.001 && c.t < nextStart - 0.001) : [];
+      // fim do intervalo: próxima linha; no ÚLTIMO verso usa último acorde + margem.
+      // NÃO usa audio.duration → determinístico (sem re-posicionar quando a duração muda)
+      const end = (nextStart !== Infinity) ? nextStart : (bucket.length ? bucket[bucket.length - 1].t + 4 : start + 8);
+      const anchor = { t: ln.t, el, start, end };
+
+      // mostra a faixa de acordes se a linha tem acordes, OU (só com acordes EXIBIDOS no
+      // modo edição avançada) um "gutter" editável p/ criar acordes com duplo-clique
+      const showRow = bucket.length > 0 || (advancedEdit && hasChords);
+      if (showRow) {
+        el.classList.add('has-chords');
+        const cr = makeChordRow(bucket, start, end);
+        anchor.sweepEl = cr.sweepEl;
+        anchor.headEl = cr.headEl;
+        anchor.chords = cr.chords;
+        cr.chords.forEach((cc) => { cc.el._anchor = anchor; });
+        cr.row._anchor = anchor;
+        el.appendChild(cr.row);
+        const txt = document.createElement('span');
+        txt.className = 'np-line-text';
+        txt.textContent = ln.text;
+        el.appendChild(txt);
+      } else {
+        el.textContent = ln.text;
+      }
+
       track.appendChild(el);
-      npLyricAnchors.push({ t: ln.t, el });
+      npLyricAnchors.push(anchor);
     });
     box.appendChild(track);
     npLyricCurTop = null; // recentra sem deslizar ao trocar de faixa
+    if (npOpen() && $('nowPlaying').classList.contains('lyrics-mode')) { measureLyrics(); lyricFrame(); }
+  } else if (hasChords) {
+    // INSTRUMENTAL (sem letra sincronizada): acordes em linhas próprias, agrupados de 4,
+    // espalhados pelo tempo dentro do trecho do grupo. Rola igual ao karaokê de letra.
+    const track = document.createElement('div');
+    track.className = 'np-lyrics-track';
+    track.style.transform = 'translate3d(0,0,0)';
+    npLyricTrack = track;
+
+    const sorted = chords.slice().sort((a, b) => a.t - b.t);
+    const groups = [];
+    for (let i = 0; i < sorted.length; i += 4) groups.push(sorted.slice(i, i + 4));
+
+    groups.forEach((g, gi) => {
+      const start = g[0].t;
+      const end = (gi + 1 < groups.length) ? groups[gi + 1][0].t : (g[g.length - 1].t + 4);
+      const el = document.createElement('div');
+      el.className = 'np-lyric np-chord-only';
+      const cr = makeChordRow(g, start, end);
+      el.appendChild(cr.row);
+      track.appendChild(el);
+      const ga = { t: start, el, start, end, sweepEl: cr.sweepEl, headEl: cr.headEl, chords: cr.chords };
+      cr.chords.forEach((cc) => { cc.el._anchor = ga; });
+      cr.row._anchor = ga;
+      npLyricAnchors.push(ga);
+    });
+    box.appendChild(track);
+    npLyricCurTop = null;
     if (npOpen() && $('nowPlaying').classList.contains('lyrics-mode')) { measureLyrics(); lyricFrame(); }
   } else if (npLyricsPlain) {
     const el = document.createElement('div');
@@ -3858,7 +4152,7 @@ function lyricFrame() {
   if (!box) return;
   const ch = box.clientHeight;
   if (!ch) return;
-  const slot = ch / 5;                       // a janela mostra ~5 linhas
+  const slot = ch / npLyricSlots;            // janela mostra ~5 linhas (6 com acordes)
   const t = audio.currentTime;
   const cy = (el) => (el._cy != null ? el._cy : el.offsetTop + el.offsetHeight / 2);
 
@@ -3913,6 +4207,43 @@ function lyricFrame() {
     a.dots.forEach((d, k) => d.classList.toggle('on', on && prog >= (k + 1) / (a.dots.length + 1)));
   }
 
+  // acordes: na linha ATIVA, a varredura (underline) + ponto-cabeça avançam pelo tempo na
+  // BASE da linha (não cruzam o texto). Cada acorde PULSA ao ser alcançado (t=c.t) e decai
+  // de volta ao estado dim em CHORD_GLOW_DECAY — por tempo absoluto, então linhas passadas
+  // voltam ao visual de "antes de ser tocado".
+  const [ar, ag, ab] = npChordAccent; // cor de destaque (da capa) p/ os acordes
+  for (let k = 0; k < npLyricAnchors.length; k++) {
+    const a = npLyricAnchors[k];
+    if (!a.chords) continue;
+    const active = (k === ai);
+    const p = (active && a.end > a.start) ? Math.min(1, Math.max(0, (t - a.start) / (a.end - a.start))) : 0;
+    const pr = Math.round(p * 1000) / 1000;
+    if (a._sw !== pr) {
+      a._sw = pr;
+      const span = chordSpanFromFraction(pr);
+      if (a.sweepEl) a.sweepEl.style.width = active ? span : '0px';
+      if (a.headEl) a.headEl.style.left = span;
+    }
+    if (a._act !== active) {
+      a._act = active;
+      if (a.sweepEl) a.sweepEl.style.opacity = active ? '1' : '0';
+      if (a.headEl) a.headEl.style.opacity = active ? '1' : '0';
+      if (!active && a.sweepEl) a.sweepEl.style.width = '0px';
+    }
+    for (const c of a.chords) {
+      const ct = c.src.t;
+      const g = (t >= ct) ? Math.max(0, 1 - (t - ct) / CHORD_GLOW_DECAY) : 0;
+      const gr = Math.round(g * 100) / 100;
+      if (c._g !== gr) {
+        c._g = gr;
+        const el = c.el;
+        el.style.color = `rgba(${ar},${ag},${ab},${(0.72 + 0.28 * gr).toFixed(3)})`;
+        el.style.textShadow = gr > 0.02 ? `0 0 ${(12 * gr).toFixed(1)}px rgba(${ar},${ag},${ab},${(0.6 * gr).toFixed(3)})` : 'none';
+        el.style.transform = `translateX(-50%) scale(${(1 + 0.16 * gr).toFixed(3)})`;
+      }
+    }
+  }
+
   if (focusEl !== npLastCenter) {
     if (npLastCenter) npLastCenter.classList.remove('active');
     focusEl.classList.add('active');
@@ -3945,9 +4276,213 @@ $('npLyricsBtn').addEventListener('click', () => {
   const np = $('nowPlaying');
   const on = np.classList.toggle('lyrics-mode');
   $('npLyricsBtn').classList.toggle('active', on);
-  if (on) { renderNpLyrics(); npLastCenter = null; npLyricCurTop = null; updateKaraoke(audio.currentTime); }
+  if (on) { npShowChords = false; renderNpLyrics(); npLastCenter = null; npLyricCurTop = null; updateKaraoke(audio.currentTime); } // entra no karaokê sempre sem acordes
+  updateChordsBtn(); // habilita/desabilita o botão de acordes conforme o modo karaokê
   syncLyricScroll();
 });
+
+// botão de acordes: quando há edições (disquete) → salva; senão alterna exibição
+$('npChordsBtn').addEventListener('click', () => {
+  if (npChordsDirty) { saveChordsInline(); return; }
+  npShowChords = !npShowChords;
+  renderNpLyrics();
+  npLastCenter = null; npLyricCurTop = null; updateKaraoke(audio.currentTime);
+});
+
+// ============== Edição inline de acordes no karaokê (modo edição avançada) ==============
+function chordEditActive() {
+  return advancedEdit && npShowChords && $('nowPlaying').classList.contains('lyrics-mode');
+}
+function markChordsDirty() { if (!npChordsDirty) { npChordsDirty = true; updateChordsBtn(); } }
+function selectChord(el) {
+  if (npSelChordEl === el) return;
+  if (npSelChordEl) npSelChordEl.classList.remove('sel');
+  npSelChordEl = el || null;
+  if (npSelChordEl) npSelChordEl.classList.add('sel');
+}
+function msStamp(tSec) {
+  const s = Math.max(0, tSec);
+  const mm = String(Math.floor(s / 60)).padStart(2, '0');
+  const ss = String(Math.floor(s % 60)).padStart(2, '0');
+  const ms = String(Math.round((s - Math.floor(s)) * 1000)).padStart(3, '0');
+  return `${mm}:${ss}.${ms}`;
+}
+// tempo (s) a partir da posição X do ponteiro dentro do trilho útil (com inset) da row
+function timeFromX(anchor, rowEl, clientX) {
+  const r = rowEl.getBoundingClientRect();
+  const usable = Math.max(1, r.width - 2 * CHORD_INSET);
+  const f = Math.min(1, Math.max(0, (clientX - r.left - CHORD_INSET) / usable));
+  return anchor.start + f * (anchor.end - anchor.start);
+}
+function repositionChord(el) {
+  const a = el._anchor; if (!a) return;
+  const f = Math.min(1, Math.max(0, (el._src.t - a.start) / Math.max(0.1, a.end - a.start)));
+  el.style.left = chordSpanFromFraction(f);
+}
+function findChordEl(srcObj) {
+  for (const a of npLyricAnchors) if (a.chords) for (const c of a.chords) if (c.src === srcObj) return c.el;
+  return null;
+}
+function showChordHint(el, tSec) {
+  let h = $('npChordHint');
+  if (!h) { h = document.createElement('div'); h.id = 'npChordHint'; h.className = 'np-chord-hint'; document.body.appendChild(h); }
+  h.textContent = msStamp(tSec);
+  h.classList.remove('hidden');
+  const r = el.getBoundingClientRect();
+  h.style.left = (r.left + r.width / 2) + 'px';
+  h.style.top = (r.top - 6) + 'px';
+}
+function hideChordHint() { const h = $('npChordHint'); if (h) h.classList.add('hidden'); }
+
+function editChordText(el, isNew) {
+  if (!el || el.querySelector('input')) return;
+  selectChord(el);
+  const src = el._src;
+  const inp = document.createElement('input');
+  inp.type = 'text'; inp.className = 'np-chord-input'; inp.value = src.text || '';
+  el.textContent = ''; el.appendChild(inp);
+  inp.focus(); inp.select();
+  let done = false;
+  const commit = (keep) => {
+    if (done) return; done = true;
+    const v = inp.value.trim();
+    if (keep && v) {
+      if (v !== src.text) { src.text = v; markChordsDirty(); }
+      el.textContent = v;
+    } else if (isNew) {
+      // criação cancelada ou nome vazio → remove o acorde recém-criado
+      const idx = npChordsLines.indexOf(src);
+      if (idx >= 0) npChordsLines.splice(idx, 1);
+      renderNpLyrics();
+    } else {
+      el.textContent = src.text || '?';
+    }
+  };
+  inp.addEventListener('keydown', (ev) => {
+    ev.stopPropagation();
+    if (ev.key === 'Enter') { ev.preventDefault(); commit(true); }
+    else if (ev.key === 'Escape') { ev.preventDefault(); commit(false); }
+  });
+  inp.addEventListener('blur', () => commit(true));
+}
+
+function createChordInRow(rowEl, clientX) {
+  const a = rowEl._anchor; if (!a) return;
+  let t = timeFromX(a, rowEl, clientX);
+  t = Math.min(a.end - 0.001, Math.max(a.start, t));
+  const obj = { t: Math.round(t * 1000) / 1000, text: 'C' };
+  npChordsLines.push(obj);
+  markChordsDirty();
+  renderNpLyrics();
+  const el = findChordEl(obj);
+  if (el) editChordText(el, true); // abre a edição do nome; cancelar remove o acorde novo
+}
+
+async function saveChordsInline() {
+  if (!current) return;
+  const lrc = (npChordsLines || [])
+    .filter((c) => c.text && c.text.trim())
+    .slice().sort((a, b) => a.t - b.t)
+    .map((c) => `[${msStamp(c.t)}]${c.text.trim()}`)
+    .join('\n');
+  audioReloading = true; // o arquivo será reescrito sob o stream
+  try {
+    const res = await window.api.chordsSet(current.filePath, lrc);
+    if (res && res.error) { toast(res.error, 'error'); audioReloading = false; return; }
+  } catch (err) {
+    toast(String((err && err.message) || err), 'error'); audioReloading = false; return;
+  }
+  npChordsDirty = false; npSelChordEl = null;
+  npChordsLines = parseLrc(lrc) || []; // estado limpo a partir do que foi salvo
+  renderNpLyrics();
+  reloadCurrentAudio();   // offsets do arquivo mudaram
+  updateChordsBtn();      // disquete → clave
+  toast(t('editor.saved'), 'success');
+}
+
+// --- camada de gestos (arrastar / criar / editar / apagar) ---
+(function initChordEdit() {
+  const box = $('npLyrics');
+  if (!box) return;
+  let drag = null;
+
+  box.addEventListener('mousedown', (e) => {
+    if (!chordEditActive()) return;
+    const el = e.target.closest('.np-chord');
+    if (!el || el.querySelector('input')) return;
+    const a = el._anchor, row = el.parentElement;
+    if (!a || !row) return;
+    drag = { el, anchor: a, row, wasPlaying: !audio.paused, moved: false, startX: e.clientX };
+  });
+  document.addEventListener('mousemove', (e) => {
+    if (!drag) return;
+    if (!drag.moved) {
+      if (Math.abs(e.clientX - drag.startX) < 4) return;
+      drag.moved = true;
+      if (drag.wasPlaying) audio.pause();   // auto-pause ao começar a arrastar
+      drag.el.classList.add('dragging');
+      selectChord(drag.el);
+    }
+    let t = timeFromX(drag.anchor, drag.row, e.clientX);
+    t = Math.min(drag.anchor.end - 0.001, Math.max(drag.anchor.start, t)); // dentro do intervalo
+    drag.el._src.t = Math.round(t * 1000) / 1000;
+    repositionChord(drag.el);
+    showChordHint(drag.el, drag.el._src.t);
+    markChordsDirty();
+    e.preventDefault();
+  });
+  const endDrag = () => {
+    if (!drag) return;
+    const d = drag; drag = null;
+    hideChordHint();
+    d.el.classList.remove('dragging');
+    if (d.moved && d.wasPlaying) audio.play().catch(() => {});
+  };
+  document.addEventListener('mouseup', endDrag);
+
+  box.addEventListener('dblclick', (e) => {
+    if (!chordEditActive()) return;
+    const chordEl = e.target.closest('.np-chord');
+    if (chordEl) { editChordText(chordEl); return; }
+    const row = e.target.closest('.np-chord-row');
+    if (row) createChordInRow(row, e.clientX);
+  });
+
+  // clicar fora de um acorde desseleciona (libera ←/→ para a navegação normal)
+  box.addEventListener('click', (e) => {
+    if (!chordEditActive()) return;
+    if (e.target.closest('.np-chord')) return; // clique no acorde já trata seleção
+    selectChord(null);
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (!chordEditActive()) return;
+    const ae = document.activeElement;
+    if (ae && ae.classList && ae.classList.contains('np-chord-input')) return; // editando texto
+    if (!npSelChordEl) return;
+    // Esc desseleciona (sem fechar o karaokê); precisa parar os OUTROS keydown do document
+    if (e.key === 'Escape') { e.preventDefault(); e.stopImmediatePropagation(); selectChord(null); return; }
+    const src = npSelChordEl._src, a = npSelChordEl._anchor;
+    if (e.key === 'Delete' || e.key === 'Backspace') {
+      e.preventDefault(); e.stopImmediatePropagation();
+      const idx = npChordsLines.indexOf(src);
+      if (idx >= 0) npChordsLines.splice(idx, 1);
+      npSelChordEl = null; markChordsDirty(); renderNpLyrics();
+    } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+      // stopImmediatePropagation: sem isso o keydown global (←/→ = faixa anterior/próxima)
+      // também dispararia, trocando de música ao ajustar o acorde.
+      e.preventDefault(); e.stopImmediatePropagation();
+      const step = e.shiftKey ? 0.1 : (e.altKey ? 0.001 : 0.01); // Shift=100ms · Alt=1ms · padrão=10ms
+      let t = src.t + (e.key === 'ArrowRight' ? step : -step);
+      if (a) t = Math.min(a.end - 0.001, Math.max(a.start, t));
+      src.t = Math.round(t * 1000) / 1000;
+      repositionChord(npSelChordEl);
+      showChordHint(npSelChordEl, src.t);
+      clearTimeout(npChordHintTimer); npChordHintTimer = setTimeout(hideChordHint, 900);
+      markChordsDirty();
+    }
+  });
+})();
 
 // ---- Fila (painel) ----
 $('queueBtn').addEventListener('click', () => {
@@ -4927,6 +5462,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   // o restante da inicialização não bloqueia a exibição da tela inicial
   Promise.all([loadPlaylists(), initSyncContext(), initEq()]).catch(() => {});
   window.api.getConfig().then((cfg) => {
+    if (cfg) advancedEdit = cfg.advancedEdit === true;
     if (cfg && !cfg.apiKey) {
       setTimeout(() => toast(t('settings.configureKey'), ''), 600);
     }

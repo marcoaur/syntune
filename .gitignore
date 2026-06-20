@@ -17,3 +17,7 @@ config.json
 
 # Configuracao local do Claude Code
 .claude/
+
+# Faixas de demonstração — curadas localmente (licença/curadoria do mantenedor),
+# não versionadas nem incluídas no build até decisão explícita. README fica versionado.
+assets/demo/*.mp3

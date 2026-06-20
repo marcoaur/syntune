@@ -198,6 +198,7 @@
       <span class="np-label"></span>
       <div class="np-top-actions">
         <button id="npLyricsBtn" class="np-btn" title="Letra" data-i18n-title="player.lyrics"></button>
+        <button id="npChordsBtn" class="np-btn hidden" title="Acordes" data-i18n-title="player.chords"></button>
         <button id="npFullscreen" class="np-btn" title="Tela cheia" data-i18n-title="player.fullscreen"></button>
         <button id="npQueueBtn" class="np-btn" title="Fila" data-i18n-title="player.queue"></button>
       </div>
@@ -419,6 +420,7 @@
                   <svg class="lsc-arrow" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
                 </button>
                 <textarea id="lyrics" class="hidden"></textarea>
+                <textarea id="chords" class="hidden"></textarea>
               </div>
             </div>
         </div>
@@ -662,6 +664,18 @@
           </div>
         </div>
 
+        <!-- Avançado -->
+        <div class="acc-item">
+          <button type="button" class="acc-head"><span data-i18n="settings.secAdvanced">Avançado</span><svg class="acc-chevron" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg></button>
+          <div class="acc-body">
+            <label class="field" style="flex-direction: row; align-items: center; justify-content: space-between; margin-top: 4px;">
+              <span class="field-label-row" data-i18n="settings.advancedEdit">Modo de edição avançada</span>
+              <label class="switch"><input id="advancedEdit" type="checkbox" /><span class="track"></span></label>
+            </label>
+            <span class="hint-text" data-i18n="settings.advancedEditHint" style="margin-top: -6px; display: block;">Permite editar os acordes direto na tela de karaokê: arrastar para ajustar o tempo, criar, apagar e renomear.</span>
+          </div>
+        </div>
+
       </div>
 
       <div class="sheet-actions">
@@ -815,6 +829,7 @@
         <div id="leArtist" class="le-h-artist"></div>
       </div>
       <div class="le-header-actions">
+        <button id="leModeBtn" class="le-icon-btn le-mode-btn" type="button" title="Editar acordes" data-i18n-title="chords.editor.modeLyrics"></button>
         <button id="leSpeedBtn" class="le-icon-btn le-speed-btn" title="Velocidade de reprodução (Alt+S)" data-i18n-title="lyrics.editor.speed">1x</button>
 
         <!-- Menu de ferramentas (overflow) -->
