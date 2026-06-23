@@ -2303,6 +2303,9 @@ $('saveSettings').addEventListener('click', async () => {
 // ====================== Player ======================
 // Ícones SVG inline (estilo traço fino, herdam a cor via currentColor).
 
+// Clave de Sol — ícone do botão de acordes no Now Playing (karaokê).
+const LE_ICON_CLEF = '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M13.1 2c-1.7 0-2.9 1.5-2.9 3.4 0 1 .2 2 .5 3.1-2 1.6-3.2 3.4-3.2 5.6 0 2.6 1.9 4.6 4.5 4.6.4 0 .8 0 1.2-.1l.3 2.1c.2 1.4-.5 2.2-1.6 2.2-.8 0-1.4-.4-1.6-1 .6-.1 1-.6 1-1.2 0-.7-.6-1.3-1.3-1.3-.8 0-1.4.6-1.4 1.5 0 1.5 1.3 2.6 3.2 2.6 1.9 0 3.2-1.3 2.9-3.3l-.3-2.2c1.6-.6 2.6-2 2.6-3.6 0-1.8-1.3-3.2-3.1-3.2-.3 0-.5 0-.8.1l-.4-2.6c1.1-1.1 1.8-2.3 1.8-3.8C14.9 3.2 14.1 2 13.1 2zm-.2 1.3c.5 0 .8.6.8 1.4 0 .9-.4 1.8-1.1 2.6-.2-.8-.4-1.6-.4-2.3 0-1 .3-1.7.7-1.7zm.6 7.8c1.1 0 1.9.9 1.9 2.1 0 1-.6 1.9-1.6 2.3l-.6-4.3c.1 0 .2-.1.3-.1zm-1.5.4l.6 4.4c-.2 0-.5.1-.7.1-1.8 0-3.1-1.4-3.1-3.2 0-1.4.8-2.6 2.1-3.6.2.8.6 1.5 1 2.3z"/></svg>';
+
 function applyPlayerIcons() {
   $('shuffleBtn').innerHTML = ICONS.shuffle;
   $('prevBtn').innerHTML = ICONS.prev;
