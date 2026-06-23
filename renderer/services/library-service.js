@@ -11,9 +11,11 @@ export class LibraryService extends StoreService {
     this.query = '';
   }
   async reload() {
-    this.songs = (await this.api.libraryList()) || [];
-    this.emitChange();
+    const r = await this.api.libraryList();
+    this.set('songs', (r && r.items) || []);
     return this.songs;
   }
-  search(q) { this.query = q || ''; this.emitChange(); }
+  /** Fonte única da biblioteca: define songs + notifica assinantes (granular). */
+  setSongs(items) { this.set('songs', items || []); }
+  search(q) { this.set('query', q || ''); }
 }

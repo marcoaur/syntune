@@ -13,6 +13,10 @@ import { ICONS } from './modules/icons.js';
 import './components/index.js';
 // Capacidades headless (ARCHITECTURE-V2): acionáveis por qualquer um (toast-like).
 import { loading, palette, menu, confirm as confirmCap } from './components/capabilities.js';
+// Store-núcleo (ARCHITECTURE-V2 Fase 3): fonte única do estado central. Por ora só a
+// biblioteca (`songs`); o renderer escreve via libraryStore.setSongs e mantém o global
+// `songs` como ESPELHO (subscribe abaixo) — leitores migram pro store aos poucos.
+import { libraryStore } from './services/core-store.js';
 
 // Substitui o confirm() nativo (síncrono/bloqueante) pela capacidade <syn-confirm> (async).
 function askConfirm(message, opts = {}) {
@@ -51,7 +55,10 @@ function applyStaticI18n() {
 }
 
 // ====================== Estado ======================
-let songs = [];          // itens da biblioteca (vindos do disco)
+let songs = [];          // ESPELHO de libraryStore.songs (fonte única; ver core-store.js)
+// Mantém o global sincronizado com o store-núcleo: todo setSongs reflete aqui até os
+// leitores migrarem para libraryStore.songs (subsistema a subsistema).
+libraryStore.subscribe('songs', (items) => { songs = items; });
 let pendingJobs = [];    // downloads/enriquecimentos em andamento (transientes)
 
 // Sincronização com dispositivo
@@ -255,10 +262,10 @@ async function reloadLibrary() {
       setTimeout(() => rej(new Error('library:list timeout')), 10000)
     );
     const res = await Promise.race([window.api.libraryList(), timeoutPromise]);
-    songs = (res && res.items) || [];
+    libraryStore.setSongs((res && res.items) || []); // fonte única → espelho `songs`
   } catch (err) {
     console.warn('[reloadLibrary]', err.message || err);
-    songs = [];
+    libraryStore.setSongs([]);
   }
   renderList();
 }
