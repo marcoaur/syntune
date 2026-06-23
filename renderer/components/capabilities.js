@@ -4,6 +4,7 @@
 // components/capability/. Conforme a Fase 1 avança, entram aqui: confirm, menu, palette.
 import './capability/syn-loading.js';
 import './capability/syn-confirm.js';
+import './capability/syn-menu.js';
 import { PaletteCapability } from './capability/palette.js';
 
 let _loading;
@@ -24,6 +25,16 @@ export function confirm() {
     document.body.appendChild(_confirm);
   }
   return _confirm;
+}
+
+let _menu;
+/** Menu de contexto. `menu().open(anchorEl, items)`; itens = ações. */
+export function menu() {
+  if (!_menu) {
+    _menu = document.createElement('syn-menu');
+    document.body.appendChild(_menu);
+  }
+  return _menu;
 }
 
 let _palette;

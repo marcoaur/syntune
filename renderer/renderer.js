@@ -1,6 +1,6 @@
 // ===================== Módulos puros (ESM) =====================
 // Helpers sem estado, extraídos do monolito. Ver renderer/modules/*.js e AGENTS.md.
-import { normPart, keyOf, normalizeText, artistInitials, escapeHtmlText, cssEsc, fmtBytes, fmtDb } from './modules/format.js';
+import { normPart, keyOf, normalizeText, artistInitials, cssEsc, fmtBytes, fmtDb } from './modules/format.js';
 import { rgbToHsl, hslToRgb, deriveBarColors, lerpPal } from './modules/color.js';
 import { isSyncedLyrics, parseLrc, lrcToPlain, parseLrcTime, fmtTimestamp, parseLrcSeconds, parseLyricsToLines, serializeLines } from './modules/lrc.js';
 import { LYRICS_STATUS, EQ_BANDS, EQ_BUILTINS } from './modules/constants.js';
@@ -12,7 +12,7 @@ import { ICONS } from './modules/icons.js';
 // resolve. Não há mais fallback legado — os custom elements estão sempre registrados.
 import './components/index.js';
 // Capacidades headless (ARCHITECTURE-V2): acionáveis por qualquer um (toast-like).
-import { loading, palette, confirm as confirmCap } from './components/capabilities.js';
+import { loading, palette, menu, confirm as confirmCap } from './components/capabilities.js';
 
 // Substitui o confirm() nativo (síncrono/bloqueante) pela capacidade <syn-confirm> (async).
 function askConfirm(message, opts = {}) {
@@ -800,39 +800,16 @@ $('ppSync').addEventListener('click', async () => {
 
 // ---- "Adicionar à playlist" (menu de contexto) ----
 function openAddToPlaylistMenu(s, anchorEl) {
-  closeSongMenu();
-  const menu = document.createElement('div');
-  menu.id = 'songContext';
-  menu.className = 'song-context';
-
-  const head = document.createElement('div'); head.className = 'ctx-head'; head.textContent = t('playlists.addToMenu');
-  menu.appendChild(head);
+  const items = [{ head: t('playlists.addToMenu') }];
   for (const p of playlists) {
-    const item = document.createElement('button');
-    item.className = 'ctx-item';
-    item.innerHTML = `${ICONS.queue}<span>${escapeHtmlText(p.name)}</span>`;
-    item.addEventListener('click', (e) => { e.stopPropagation(); closeSongMenu(); addToPlaylist(p.id, s.filePath); });
-    menu.appendChild(item);
+    items.push({ icon: ICONS.queue, label: p.name, onClick: () => addToPlaylist(p.id, s.filePath) });
   }
-  const sep = document.createElement('div'); sep.className = 'ctx-sep'; menu.appendChild(sep);
-  const nv = document.createElement('button');
-  nv.className = 'ctx-item';
-  nv.innerHTML = `${ICONS.plusSm}<span>${t('playlists.new')}</span>`;
-  nv.addEventListener('click', (e) => {
-    e.stopPropagation(); closeSongMenu();
+  items.push({ sep: true });
+  items.push({ icon: ICONS.plusSm, label: t('playlists.new'), onClick: () => {
     const p = createPlaylist(); p.tracks.push(s.filePath); savePlaylists();
     toast(t('playlists.createdWithTrack', { name: p.name }), 'success');
-  });
-  menu.appendChild(nv);
-
-  document.body.appendChild(menu);
-  const r = anchorEl.getBoundingClientRect();
-  const mw = 200;
-  let left = r.right - mw; if (left < 8) left = 8;
-  let top = r.bottom + 4; if (top + 200 > window.innerHeight - 8) top = Math.max(8, r.top - 200);
-  menu.style.left = left + 'px'; menu.style.top = top + 'px';
-  songMenuDocHandler = (e) => { const m = document.getElementById('songContext'); if (m && !m.contains(e.target)) closeSongMenu(); };
-  setTimeout(() => { document.addEventListener('click', songMenuDocHandler); window.addEventListener('resize', closeSongMenu); }, 0);
+  } });
+  menu().open(anchorEl, items);
 }
 
 // View-model do card p/ a ilha Lit (renderer prepara; o componente é view pura).
@@ -1881,60 +1858,14 @@ function onDeleteClick() {
 }
 
 // ====================== Menu de opções da música (⋯) ======================
-let songMenuDocHandler = null;
-function closeSongMenu() {
-  const m = document.getElementById('songContext');
-  if (m) m.remove();
-  if (songMenuDocHandler) {
-    document.removeEventListener('click', songMenuDocHandler);
-    window.removeEventListener('resize', closeSongMenu);
-    songMenuDocHandler = null;
-  }
-}
+// Usa a capacidade <syn-menu> (portal/posição/fechar próprios). Itens = ações.
 function openSongMenu(s, anchorEl) {
-  closeSongMenu();
-  const menu = document.createElement('div');
-  menu.id = 'songContext';
-  menu.className = 'song-context';
-
-  const det = document.createElement('button');
-  det.className = 'ctx-item';
-  det.innerHTML = `${ICONS.edit}<span>${t('menu.details')}</span>`;
-  det.addEventListener('click', (e) => { e.stopPropagation(); closeSongMenu(); openEditor(s); });
-
-  const nxt = document.createElement('button');
-  nxt.className = 'ctx-item';
-  nxt.innerHTML = `${ICONS.next}<span>${t('menu.playNext')}</span>`;
-  nxt.addEventListener('click', (e) => { e.stopPropagation(); closeSongMenu(); enqueueNext(s); });
-
-  const addpl = document.createElement('button');
-  addpl.className = 'ctx-item';
-  addpl.innerHTML = `${ICONS.queue}<span>${t('playlists.addToMenu')}</span>`;
-  addpl.addEventListener('click', (e) => { e.stopPropagation(); openAddToPlaylistMenu(s, anchorEl); });
-
-  const del = document.createElement('button');
-  del.className = 'ctx-item danger';
-  del.innerHTML = `${ICONS.trash}<span>${t('common.delete')}</span>`;
-  del.addEventListener('click', (e) => { e.stopPropagation(); closeSongMenu(); openDeleteModal(s); });
-
-  menu.append(det, nxt, addpl, del);
-  document.body.appendChild(menu);
-
-  const r = anchorEl.getBoundingClientRect();
-  const mw = 160, mh = 132;
-  let left = r.right - mw; if (left < 8) left = 8;
-  let top = r.bottom + 4; if (top + mh > window.innerHeight - 8) top = r.top - mh - 4;
-  menu.style.left = left + 'px';
-  menu.style.top = top + 'px';
-
-  songMenuDocHandler = (e) => {
-    const m = document.getElementById('songContext');
-    if (m && !m.contains(e.target)) closeSongMenu();
-  };
-  setTimeout(() => {
-    document.addEventListener('click', songMenuDocHandler);
-    window.addEventListener('resize', closeSongMenu);
-  }, 0);
+  menu().open(anchorEl, [
+    { icon: ICONS.edit, label: t('menu.details'), onClick: () => openEditor(s) },
+    { icon: ICONS.next, label: t('menu.playNext'), onClick: () => enqueueNext(s) },
+    { icon: ICONS.queue, label: t('playlists.addToMenu'), onClick: () => openAddToPlaylistMenu(s, anchorEl) },
+    { icon: ICONS.trash, label: t('common.delete'), danger: true, onClick: () => openDeleteModal(s) },
+  ]);
 }
 
 // ====================== Modal de exclusão (dispositivo / PC / ambos) ======================
