@@ -11,6 +11,8 @@ import { ICONS } from './modules/icons.js';
 // Seguro pós-Fase F: o renderer roda SEMPRE bundlado (electron-vite), onde `import 'lit'`
 // resolve. Não há mais fallback legado — os custom elements estão sempre registrados.
 import './components/index.js';
+// Capacidades headless (ARCHITECTURE-V2): acionáveis por qualquer um (toast-like).
+import { loading } from './components/capabilities.js';
 
 // O main resolve o idioma (locale do sistema + cache em config.json) e entrega
 // o dicionário pronto. t() traduz chaves; tn() escolhe singular/plural;
@@ -142,11 +144,10 @@ window.api.onUpdateReady((info) => {
 });
 
 // ====================== Overlay de carregamento ======================
-function showLoading(msg) {
-  $('loadingMsg').textContent = msg || t('common.loading');
-  $('loadingOverlay').classList.remove('hidden', 'closing');
-}
-function hideLoading() { $('loadingOverlay').classList.add('hidden'); }
+// Delegam à capacidade <syn-loading> (portal no body). Wrappers finos p/ não tocar os
+// ~15 call-sites de showLoading/hideLoading.
+function showLoading(msg) { loading().show(msg || t('common.loading')); }
+function hideLoading() { loading().hide(); }
 const paint = () => new Promise((r) => requestAnimationFrame(() => r()));
 
 // Fecha uma tela/overlay com animação de saída (sem corte seco): aplica .closing,
