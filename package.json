@@ -9,7 +9,7 @@
     "stune": "src/cli/stune.js"
   },
   "scripts": {
-    "start": "electron .",
+    "start": "npm run build:vite && electron .",
     "dev": "electron-vite dev",
     "build:vite": "electron-vite build",
     "preview": "electron-vite preview",

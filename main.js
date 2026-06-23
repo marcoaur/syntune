@@ -49,13 +49,13 @@ const ROOT_LAYOUT = fs.existsSync(path.join(__dirname, 'preload.js'));
 const PRELOAD_PATH = ROOT_LAYOUT
   ? path.join(__dirname, 'preload.js')
   : path.join(__dirname, '..', 'preload', 'preload.js');
-// Renderer: empacotado carrega o BUNDLE out/renderer (Lit + ilhas, via electron-vite);
-// em dev pelo `electron .` carrega o renderer/ legado (sem bundler); em `electron-vite dev`
-// o ELECTRON_RENDERER_URL tem prioridade (loadURL, abaixo). main/preload seguem na raiz
-// (não-bundlados) — só o renderer é shipado bundlado (evita o landmine do worker no asar).
-const RENDERER_INDEX = app.isPackaged
-  ? path.join(app.getAppPath(), 'out', 'renderer', 'index.html')
-  : path.join(app.getAppPath(), 'renderer', 'index.html');
+// Renderer: SEMPRE o BUNDLE out/renderer (Lit + ilhas). Empacotado e `electron .` em dev
+// carregam o index.html bundlado do disco; `electron-vite dev` serve via dev-server e o
+// ELECTRON_RENDERER_URL tem prioridade (loadURL, abaixo). O `npm start` builda antes
+// (build:vite → out/renderer). main/preload seguem na raiz (não-bundlados) — só o renderer
+// é bundlado (evita o landmine do worker no asar). O caminho renderer/ cru foi aposentado
+// (Fase F): tudo roda na arquitetura de ilhas, sem fallback legado.
+const RENDERER_INDEX = path.join(app.getAppPath(), 'out', 'renderer', 'index.html');
 
 // ---------- Janela ----------
 let mainWindow;
