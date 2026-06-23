@@ -12,7 +12,12 @@ import { ICONS } from './modules/icons.js';
 // resolve. Não há mais fallback legado — os custom elements estão sempre registrados.
 import './components/index.js';
 // Capacidades headless (ARCHITECTURE-V2): acionáveis por qualquer um (toast-like).
-import { loading, palette } from './components/capabilities.js';
+import { loading, palette, confirm as confirmCap } from './components/capabilities.js';
+
+// Substitui o confirm() nativo (síncrono/bloqueante) pela capacidade <syn-confirm> (async).
+function askConfirm(message, opts = {}) {
+  return confirmCap().ask({ message, cancelLabel: t('common.cancel'), ...opts });
+}
 
 // O main resolve o idioma (locale do sistema + cache em config.json) e entrega
 // o dicionário pronto. t() traduz chaves; tn() escolhe singular/plural;
@@ -766,7 +771,7 @@ $('ppPlay').addEventListener('click', () => { const p = findPlaylist(currentPlay
 $('ppRename').addEventListener('click', renamePlaylistInline);
 $('ppDelete').addEventListener('click', async () => {
   const p = findPlaylist(currentPlaylistId); if (!p) return;
-  if (!confirm(t('playlists.deleteConfirm', { name: p.name }))) return;
+  if (!(await askConfirm(t('playlists.deleteConfirm', { name: p.name }), { danger: true, confirmLabel: t('common.delete') }))) return;
   playlists = playlists.filter((x) => x.id !== p.id);
   await savePlaylists();
   closePlaylistPage();
@@ -1710,7 +1715,7 @@ $('lmPublishBtn').addEventListener('click', async () => {
 
 // -- Remover letra --
 $('lmClearBtn').addEventListener('click', async () => {
-  if (!confirm(t('lyrics.confirm.remove'))) return;
+  if (!(await askConfirm(t('lyrics.confirm.remove'), { danger: true, confirmLabel: t('common.delete') }))) return;
   $('lyrics').value = '';
   if (currentFilePath) await window.api.lyricsSetSyncStatus(currentFilePath, 'not_found');
   await updateLyricsStatusCard();
@@ -2168,7 +2173,7 @@ $('lastfmScrobbleEnabled').addEventListener('change', (e) => {
 // Desligar: remove a var. A var é (re)gravada ao salvar a chave, se o switch estiver ligado.
 $('useCliAi').addEventListener('change', async (e) => {
   const on = e.target.checked;
-  if (on && !confirm(t('settings.cliAiConfirm'))) {
+  if (on && !(await askConfirm(t('settings.cliAiConfirm')))) {
     e.target.checked = false; // usuário recusou → reverte
     return;
   }
@@ -2538,16 +2543,16 @@ function reloadCurrentAudio() {
 
 // Avisa antes de trocar de faixa com edições de acordes não salvas. Retorna false
 // (abortar) se o usuário cancelar; true caso contrário (sem edições, mesma faixa, ou OK).
-function confirmChordSwitch(index) {
+async function confirmChordSwitch(index) {
   if (!npChordsDirty) return true;
   const next = queue[index];
   if (!next || (current && next.filePath === current.filePath)) return true;
-  return window.confirm(t('chords.confirmDiscard'));
+  return askConfirm(t('chords.confirmDiscard'), { danger: true });
 }
 
 async function playAt(index) {
   if (index < 0 || index >= queue.length) return;
-  if (!confirmChordSwitch(index)) return; // edições de acordes não salvas: usuário cancelou
+  if (!(await confirmChordSwitch(index))) return; // edições de acordes não salvas: usuário cancelou
   queueIndex = index;
   current = queue[index];
   $('player').classList.remove('hidden', 'closing');
