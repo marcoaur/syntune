@@ -6,6 +6,12 @@ import { isSyncedLyrics, parseLrc, lrcToPlain, parseLrcTime, fmtTimestamp, parse
 import { LYRICS_STATUS, EQ_BANDS, EQ_BUILTINS } from './modules/constants.js';
 import { ICONS } from './modules/icons.js';
 
+// Camada Lit (ilhas + folhas): import ESTÁTICO → registra todos os custom elements
+// (customElements.define) durante o eval deste módulo, ANTES do 1º render/DOMContentLoaded.
+// Seguro pós-Fase F: o renderer roda SEMPRE bundlado (electron-vite), onde `import 'lit'`
+// resolve. Não há mais fallback legado — os custom elements estão sempre registrados.
+import './components/index.js';
+
 // O main resolve o idioma (locale do sistema + cache em config.json) e entrega
 // o dicionário pronto. t() traduz chaves; tn() escolhe singular/plural;
 // applyStaticI18n() aplica as traduções nos elementos estáticos do HTML
@@ -4101,15 +4107,13 @@ async function loadCurrentLyrics(filePath) {
 // legado — a remoção do antigo é Fase E, só após paridade. Ativa apenas no caminho
 // BUNDLADO (electron-vite dev/build/prod): sob `electron .` o renderer roda sem bundler,
 // o import dinâmico de 'lit' falha → cai no catch → o legado segue sozinho, sem regressão.
-// Carrega a camada Lit (ilhas + folhas) cedo, p/ os custom elements já estarem registrados
-// quando os cards/painéis renderizam. Guardado: sob `electron .` (sem bundler) o import de
-// 'lit' falha → resolve null → os usos caem no fallback legado, sem regressão. No bundle
-// (electron-vite dev/prod) registra e os usos passam a renderizar via Lit.
-const _litReady = import('./components/index.js').catch(() => null);
+// As ilhas já foram registradas pelo import estático no topo do arquivo. _litReady é só
+// um gancho resolvido p/ rodar o setup global (app-root/serviços) como microtask após o
+// eval do módulo (DOM já parseado), antes do DOMContentLoaded.
+const _litReady = Promise.resolve(true);
 
-// Toast via ilha Lit: monta UM <syn-app-root> global (provê os serviços) com <syn-toast>
-// dentro. O toast() legado encaminha pro ToastService quando a ilha está ativa (bundle);
-// sob `electron .` (sem bundler) _litReady = null → toast() usa o DOM legado.
+// Toast via ilha Lit: monta UM <syn-app-root> global (provê os serviços) com <syn-toast> dentro.
+// O toast() encaminha pro ToastService da ilha.
 let _litToast = null;
 let _litPlayer = null; // facade do player (Fase D): o renderer sincroniza estado aqui
 let _litViz = null;    // visualizer Lit (Fase E): recebe analyser/freqData/coverEl/palette/active

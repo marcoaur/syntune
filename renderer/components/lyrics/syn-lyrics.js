@@ -13,6 +13,7 @@
 // (synced/chords-on/np-synced) e a var --chord-accent. A edição inline de acordes
 // (advancedEdit) permanece no caminho legado — sua migração é um sub-passo posterior.
 import { html, css } from 'lit';
+import { unsafeHTML } from 'lit/directives/unsafe-html.js';
 import { ContextConsumer } from '@lit/context';
 import { SyntuneElement } from '../base/syntune-element.js';
 import { ContainerMixin } from '../base/container-mixin.js';
@@ -190,7 +191,8 @@ export class SynLyrics extends ContainerMixin(SyntuneElement) {
       if (this.plain) {
         return html`<div class="np-lyrics-empty" style="white-space:pre-wrap;max-width:720px;font-size:17px;line-height:1.8;font-weight:600;color:rgba(255,255,255,.85)">${this.plain}</div>`;
       }
-      return html`<div class="np-lyrics-empty">${this.t('player.noLyrics')}</div>`;
+      // i18n confiável com <strong> → renderiza como HTML (paridade c/ o innerHTML legado)
+      return html`<div class="np-lyrics-empty">${unsafeHTML(this.t('player.noLyrics'))}</div>`;
     }
 
     const slots = hasChords ? 6 : 5; // 6 linhas na janela quando há acordes
