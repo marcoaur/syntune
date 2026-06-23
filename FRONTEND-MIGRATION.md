@@ -128,7 +128,16 @@ Toda ilha só é "concluída" quando cumpre, além do contrato (§1):
 > As tabelas abaixo listam só os **checks ESPECÍFICOS** de cada ilha (além da DoD). Os
 > específicos estão consolidados em §3.1.
 
-### Fase 0 — Fatia vertical & padrões EMERGENTES (PRÉ-REQUISITO DE TUDO) — Status: ☐
+### Fase 0 — Fatia vertical & padrões EMERGENTES (PRÉ-REQUISITO DE TUDO) — Status: ☑
+> **Feito:** fatia vertical da **ilha de acordes** (`components/chord/syn-chord-line.js` +
+> `syn-chord-mark.js`) rodando no app via electron-vite, fundindo arquétipos **A+B+C+D**
+> (folha + container + conectado ao PlayerService + hot-path rAF) sob o provider **E**
+> (`app-root.js`). **HMR-sem-flicker validado** no boot (áudio preservado). Padrões
+> **assinados** em `components/_patterns/` (README de assinatura + 5 templates A–E).
+> **Generalização confirmada (Passo 2):** `components/control/syn-switch.js` (folha de
+> controle, arquétipo A) reusa base/estilos/evento padrão — ilha distinta da de acordes.
+> Testes verdes: `npm run test:wc` (2 arquivos, 10 specs). Coexiste com o karaokê legado —
+> remoção do antigo (paridade: weaving por linha + edição inline) = Fase E.
 > **Ajuste anti-over-engineering:** o padrão **EMERGE de código real**, não é decretado de
 > um spike. Não assine 5 arquétipos no papel antes de entregar 1 ilha de verdade.
 
@@ -174,61 +183,71 @@ extraídos do que já funcionou. Mudar arquétipo depois = caro; por isso só as
 - **Entregável:** `renderer/components/_patterns/` com 1 template por arquétipo (A–E) + doc de
   assinatura. Todo componente novo **copia** desses templates. Mudar arquétipo depois = caro.
 
-### Fase A — Infra (pré-requisito) — Status: ☐
-- [ ] `npm i -D electron-vite vite` + `npm i lit @lit/context`
-- [ ] `electron.vite.config.js` mínimo (main/preload/renderer) + scripts `dev`/`build`
-- [ ] `main.js`: `loadURL(process.env.ELECTRON_RENDERER_URL)` em dev / `loadFile` em prod
-- [ ] integrar saída `out/` ao electron-builder (`build.files` + `main` do package.json)
-- [ ] confirmar **HMR sem flicker** (editar 1 componente, estado/áudio preservados)
-- [ ] `SyntuneElement` + `ContainerMixin` + controllers + `sharedStyles`
-- [ ] Services + contexts (esqueleto) + `<app-root>` provider
-- [ ] `ApiService` (wrap `window.api`)
-- [ ] **IPC type-safe (1ª leva, sem TS):** `src/ipc/contract.js` com `@typedef` JSDoc por
-  canal (payload+retorno); preload, handlers e `ApiService` referenciam; `@ts-check` nos
-  arquivos + (opcional) `tsc --noEmit --checkJs` no CI. Sem `.ts`, sem build novo. Trampolim
-  pra futura migração TS. (Opcional: guard de runtime fino na borda validando payload.)
-- [ ] ponte de interop (montar 1 ilha de teste dentro do renderer atual)
+### Fase A — Infra (pré-requisito) — Status: ☑ (renderer bundlado shipa; main/preload na raiz por design)
+- [x] `npm i -D electron-vite vite` + `npm i lit @lit/context` (lit 3.3.3, @lit/context 1.1.6, electron-vite 5, vite 7)
+- [x] `electron.vite.config.js` (main/preload/renderer) + scripts **aditivos** `dev`/`build:vite`/`preview` (start/dist intactos)
+- [x] `main.js`: `loadURL(ELECTRON_RENDERER_URL)` em dev / `loadFile` em prod; `ROOT_LAYOUT` resolve preload/renderer nos 2 modos; ícone/assets via `app.getAppPath()`; `i18n.js` locales idem (seguro p/ o CLI)
+- [x] **cutover de prod (renderer-only):** `dist` = `build:vite && electron-builder`; `build.files` shipa `out/renderer/**` (no lugar de `renderer/**`); `main.js` carrega `out/renderer/index.html` quando `app.isPackaged`, senão `renderer/` (dev). `lit`/`@lit/context` → devDeps (inlinados no bundle, fora do `node_modules` do app). Pack `--dir` validado (asar tem `out/renderer`, sem `renderer/` raw, sem `lit`). **main/preload seguem NÃO-bundlados na raiz por design** — evita o landmine de `worker_threads`/`sync-worker.js` dentro do asar (não testável headless). Bundlar o main também = item futuro só se necessário.
+- [ ] confirmar **HMR sem flicker** (editar 1 componente, estado/áudio preservados) — visível agora que há ilha (Fase 0)
+- [x] `SyntuneElement` + `ContainerMixin` + `RafController`/`MediaTimeController` + `sharedStyles`
+- [x] Services + contexts (esqueleto) + `<syn-app-root>` provider (ContextProvider, sem decorators)
+- [x] `ApiService` (wrap `window.api`)
+- [x] **IPC type-safe:** `src/ipc/contract.js` define `IpcApi` (superfície completa de `window.api`) + payloads; **preload** implementa tipado contra `IpcApi` e **ApiService** consome, ambos com `// @ts-check`; `npm run typecheck` (tsc, no-emit) cobre o par CJS preload↔contract e roda na CI. Falta só os **handlers do main** referenciarem (depois).
+- [x] ponte de interop (import dinâmico guardado: ilha monta no bundle, `electron .` cai no catch)
+- [x] **gate de CI automatizado** (§2.7 #4): job `web-components` roda `typecheck` + `build:vite` + `test:wc` (Playwright); `npm test` escopado a `test/` (componentes só no `test:wc`); script `npm run gate` roda tudo local.
 
-### Fase B — Folhas (baixo risco, sem estado compartilhado) — Status: ☐
+> **Armadilha registrada:** electron-vite + main CJS-source **não bundla `require()` relativo**
+> (Vite só roda commonjs em `node_modules`). Fix: `main.build.commonjsOptions.include = [/node_modules/, /\.c?js$/]`.
+
+### Fase B — Folhas (baixo risco, sem estado compartilhado) — Status: ☑ (9/9 componentes+teste; fiados e CONFIRMADOS no app: toast, settings, cropper, EQ, sync-badge)
 | Componente | Tag | Categoria | Notas | Status |
 |---|---|---|---|---|
-| Toast | `syn-toast` | panel | consome ToastService | ☐ |
-| Ícone | `syn-icon` | control | dados puros (ICONS) | ☐ |
-| Switch | `syn-switch` | control | param `checked`, emite `syn:control:change` | ☐ |
-| Slider | `syn-range` | control | param `value/min/max`, emite change | ☐ |
-| Badge sync | `syn-sync-badge` | control | param `status` | ☐ |
+| Toast | `syn-toast` | panel | consome ToastService (context); ícone/tipo, aria-live, auto-hide 3200+260ms | ☑ fiado+confirmado (app-root global no body; toast() encaminha) |
+| Ícone | `syn-icon` | control | dados puros (ICONS); `name`/`label` (role=img) | ◐ componente+teste |
+| Switch | `syn-switch` | control | param `checked`, emite `syn:control:change`; a11y role=switch | ◐ componente+teste |
+| Slider | `syn-range` | control | `<input type=range>` nativo; `value/min/max/step`, emite change | ◐ componente+teste |
+| Badge sync | `syn-sync-badge` | control | param `status` (synced ✓ / unsynced ○) + `label` | ◐ componente+teste+**fiado nos cards** (swap guardado: Lit no bundle, span legado sob `electron .`) |
 | **Chord mark** | `syn-chord-mark` | chord | **piloto pronto** (portar do pilot) | ◐ |
-| EQ panel | `syn-eq` | panel | 6 bandas, param `gains`, emite change | ☐ |
-| Cover cropper | `syn-cropper` | panel | param `src`, emite `syn:cover:crop` | ☐ |
-| Seção de settings | `syn-setting-section` | setting | accordion item param `open` | ☐ |
+| EQ panel | `syn-eq` | panel | 6 bandas (`gains`); modo `bare` (só bandas, chrome legado); **compõe 6× syn-range** | ☑ fiado+confirmado (Web Audio) |
+| Cover cropper | `syn-cropper` | panel | `src`, pan/zoom (mouse+roda+**teclado**), emite `syn:cover:crop`; **compõe syn-range** | ☑ fiado+confirmado |
+| Seção de settings | `syn-setting-section` | setting | accordion `open`; **compõe syn-icon** | ☑ fiado+confirmado (upgrade da sheet) |
 
-### Fase C — Containers (entendem filhos por categoria) — Status: ☐
+### Fase C — Containers (entendem filhos por categoria) — Status: ☑ (containers migrados; adiados c/ rationale: virtualização da library, add-bar)
 | Componente | Tag | Filhos (categoria) | Status |
 |---|---|---|---|
 | **Chord line** | `syn-chord-line` | `chord` (`syn-chord-mark`) | ◐ piloto |
-| Song card | `syn-song-card` | control (badge/menu) | ☐ |
-| Library list | `syn-library` | song (`syn-song-card`) + prateleiras por gênero | ☐ |
-| Playlists grid | `syn-playlists` | playlist | ☐ |
-| Playlist page | `syn-playlist-page` | song | ☐ |
-| Artist page | `syn-artist-page` | song | ☐ |
-| Devices center | `syn-devices` | device | ☐ |
-| Settings sheet | `syn-settings` | setting (`syn-setting-section`) | ☐ |
-| Add bar (YouTube) | `syn-add-bar` | control | ☐ |
+| Song card | `syn-song-card` | song | ☑ fiado+confirmado — Lit light-DOM dirigido por VM; capa reativa (lazy, sem reload); compõe syn-icon+syn-sync-badge; intents play/menu/cover → orquestração legada. Guardado DENTRO de `buildSongCard` → herdado por lista, grupos, página de playlist e de artista |
+| Library list | `syn-song-card` | song | ◐ cards = syn-song-card (confirmado); busca/agrupamento/cascata/virtualização seguem no `renderList` (renderer) |
+| Playlists grid | `syn-playlist-card` | playlist | ☑ fiado — Lit light-DOM (reusa `.pl-card`); `coverHtml` props down; emite `syn:playlist:open`; card "novo" legado |
+| Playlist page | `syn-song-card` (modo row) | song | ☑ faixas = `syn-song-card` c/ modo `row` (handle de drag + remover no template, emite `syn:song:remove`; reorder/drag no card); hero (cover/ações) = legado funcional |
+| Artist page | `syn-song-card` | song | ☑ faixas = `syn-song-card` (agrupadas por álbum no renderer); hero/stats/bio = legado funcional |
+| Devices center | `syn-device` (linha) | device | ☑ fiado+confirmado — Lit **light-DOM** (reusa CSS global + helpers por-serial); intents delegados → orquestração legada (`runScanAndSync`); capacidade/escopo+chips/progresso/sync-now. Container = `#deviceList` legado |
+| Settings sheet | `syn-setting-section` | setting | ☑ via `syn-setting-section` (upgrade da sheet, Fase B) — container dedicado seria redundante |
+| Add bar (YouTube) | `syn-add-bar` | control | ⏸ adiado — legado funcional; acoplado à toolbar (anim `.open`) + jobs + bindings de startup (`$('ytBtn')`…); custo > valor. Migra junto se a toolbar virar componente |
 
-### Fase D — Player core (estado compartilhado forte) — Status: ☐
+### Fase D — Player core (estado compartilhado forte) — Status: ◐ (facade + queue; mini-player em migração)
+> **PlayerService = fonte única de estado (facade) ✅** — o renderer sincroniza título/artista/capa/
+> isPlaying/shuffle/repeat/volume no `PlayerService` (services/player-service.js), `<audio>` real ligado;
+> métodos delegam ao transporte legado (`controls.*`). Aditivo, zero regressão. O mini-player consome
+> a facade reativo + rAF p/ o seek (hot-path). Now-playing migra depois.
+
 | Componente | Tag | Notas | Status |
 |---|---|---|---|
-| Mini-player | `syn-mini-player` | consome PlayerService | ☐ |
-| Now Playing (casca) | `syn-now-playing` | container do imersivo; slots p/ stage/lyrics/controles | ☐ |
-| Queue panel | `syn-queue` | container de itens song; reorder | ☐ |
+| PlayerService facade | `PlayerService` | fonte única de estado; renderer sincroniza; delega transporte | ☑ |
+| Queue panel | `syn-queue-item` | item Lit light-DOM (capa/título/atual); jump/remove/reorder via intents | ☑ fiado+confirmado |
+| Mini-player | `syn-mini-player` | consome PlayerService (light-DOM, host=#player); rAF no seek; controles→facade | ◐ rascunho (teste minucioso) |
+| Now Playing (casca) | `syn-now-playing` | container imersivo | ☐ |
 
-### Fase E — Zonas quentes (rAF) — POR ÚLTIMO — Status: ☐
+### Fase E — Zonas quentes (rAF) — POR ÚLTIMO — Status: ◐ (visualizer feito)
+> Limpeza feita: removido o lixo do piloto (faixa "ilha Lit • acordes (preview)" + switch "mostrar régua")
+> que ficou no `#nowPlaying` desde a Fase 0. Os componentes `syn-chord-line`/`syn-chord-mark` ficam (reusados pela karaokê).
+
 | Componente | Tag | Cuidado | Status |
 |---|---|---|---|
-| Visualizer | `syn-visualizer` | canvas + Web Audio; RafController; **nunca** re-render por frame | ☐ |
-| Karaokê (letra) | `syn-lyrics` | scroll por transform (mola), MediaTimeController | ☐ |
-| Chords overlay | `syn-chord-line` (em ctx) | barra/glow imperativos; já provado no piloto | ☐ |
-| Editor inline de acorde | controller sobre `syn-chord-line` | gestos (drag/setas/criar/apagar), dirty/save | ☐ |
+| Visualizer | `syn-visualizer` | canvas + Web Audio; RafController; **nunca** re-render por frame; pausa oculto | ☑ fiado+confirmado — anel circular idêntico ao legado; recebe analyser/freqData/coverEl/palette/active do renderer; light-DOM (`display:contents`, canvas `.np-viz`) |
+| Karaokê (letra) | `syn-lyrics` | scroll por transform (mola), MediaTimeController | ☑ componente+teste+fiado+**gate de app OK** (usuário testou à exaustão, sem bugs); swap guardado (Lit no bundle, legado sob `electron .`/edição inline) |
+| Chords overlay | `syn-chord-line` (em ctx) | barra/glow imperativos; já provado no piloto | ☑ reusado por `syn-lyrics` (1 por verso, janela `[verso.t, próximo.t]`); ganhou `.active` (gate da varredura) + `.player` (facade fora do app-root) |
+| Editor inline de acorde | controller sobre `syn-chord-line` | gestos (drag/setas/criar/apagar), dirty/save | ☐ (advancedEdit segue no legado por ora) |
 | Editor de letra (tap-time) | `syn-lyrics-editor` | reusa mecânica do inline | ☐ |
 | Editor de detalhes (tags) | `syn-track-editor` | form + IA enrich + cropper | ☐ |
 

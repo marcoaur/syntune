@@ -38,6 +38,25 @@ if (!app.isPackaged) {
 // loadGeminiUsage/persistGeminiUsage usam readConfig/writeConfig p/ persistir o RPD.
 const { callGemini, loadGeminiUsage, ID3_SCHEMA } = createGeminiService({ readConfig, writeConfig });
 
+// ---------- Resolução de caminhos: `electron .` (raiz) × electron-vite (out/) ----------
+// `electron .` roda main/preload/renderer da raiz do projeto. O electron-vite bundla
+// main→out/main, preload→out/preload e renderer→out/renderer (ou serve via dev-server).
+// Detectamos o layout pela presença de preload.js ao lado do main para resolver
+// preload/renderer; recursos read-only (ícone, assets/demo, locales) ancoram em
+// app.getAppPath() — que aponta p/ a raiz do projeto em dev e p/ a raiz do asar
+// quando empacotado, valendo nos dois modos sem ramificação.
+const ROOT_LAYOUT = fs.existsSync(path.join(__dirname, 'preload.js'));
+const PRELOAD_PATH = ROOT_LAYOUT
+  ? path.join(__dirname, 'preload.js')
+  : path.join(__dirname, '..', 'preload', 'preload.js');
+// Renderer: empacotado carrega o BUNDLE out/renderer (Lit + ilhas, via electron-vite);
+// em dev pelo `electron .` carrega o renderer/ legado (sem bundler); em `electron-vite dev`
+// o ELECTRON_RENDERER_URL tem prioridade (loadURL, abaixo). main/preload seguem na raiz
+// (não-bundlados) — só o renderer é shipado bundlado (evita o landmine do worker no asar).
+const RENDERER_INDEX = app.isPackaged
+  ? path.join(app.getAppPath(), 'out', 'renderer', 'index.html')
+  : path.join(app.getAppPath(), 'renderer', 'index.html');
+
 // ---------- Janela ----------
 let mainWindow;
 let closingForReal = false; // o 1º close vira fade-out; o 2º fecha de verdade
@@ -55,17 +74,24 @@ function createWindow() {
     backgroundMaterial: 'mica',      // barra/fundo acompanha o tema do sistema (Win11)
     roundedCorners: true,
     title: 'Syntune',
-    icon: path.join(__dirname, 'src', 'img', 'icone.ico'),
+    icon: path.join(app.getAppPath(), 'src', 'img', 'icone.ico'),
     show: false,                     // evita o flash da janela vazia; exibe só quando pronta
     autoHideMenuBar: true,
     webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
+      preload: PRELOAD_PATH,
       contextIsolation: true,
       nodeIntegration: false
     }
   });
 
-  mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+  // Em dev pelo electron-vite, o renderer é servido pelo dev-server (HMR sem flicker);
+  // o electron-vite injeta ELECTRON_RENDERER_URL. Sem essa env (rodando `electron .`
+  // ou empacotado), carrega o index.html do disco — preservando o fluxo atual.
+  if (process.env.ELECTRON_RENDERER_URL) {
+    mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL);
+  } else {
+    mainWindow.loadFile(RENDERER_INDEX);
+  }
 
   // mostra a janela apenas quando o conteúdo já pode ser pintado (1ª frame = splash)
   mainWindow.once('ready-to-show', () => mainWindow.show());
@@ -161,7 +187,7 @@ function seedDemoLibrary() {
     try { existing = fs.readdirSync(libDir).filter((f) => f.toLowerCase().endsWith('.mp3')); } catch { /* dir novo */ }
 
     if (existing.length === 0 || force) {
-      const demoDir = path.join(__dirname, 'assets', 'demo');
+      const demoDir = path.join(app.getAppPath(), 'assets', 'demo');
       let demos = [];
       try { demos = fs.readdirSync(demoDir).filter((f) => f.toLowerCase().endsWith('.mp3')); } catch { /* sem assets: no-op */ }
       let copied = 0;

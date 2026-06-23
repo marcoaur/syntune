@@ -41,6 +41,33 @@ jobs:
       - name: i18n key parity
         run: node scripts/check-i18n.js
 
+  # Componentes Lit (migração por ilhas): bundle do electron-vite + testes de componente.
+  # Cobre o que o `node --check` não pega (resolução de 'lit'/@lit/context + render no browser).
+  web-components:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck IPC contract (tsc, no emit)
+        run: npm run typecheck
+
+      - name: Build bundle (electron-vite → out/)
+        run: npm run build:vite
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Component tests (@web/test-runner)
+        run: npm run test:wc
+
   # Teste de empacotamento multiplataforma: garante que o app monta em
   # Windows, macOS e Linux (sem gerar instaladores — só o app empacotado).
   pack:

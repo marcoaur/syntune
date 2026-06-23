@@ -99,6 +99,8 @@ $('btnMin').addEventListener('click', () => window.api.minimize());
 let toastTimer;
 let toastHideTimer;
 function toast(message, type = '') {
+  // ilha Lit ativa (bundle): delega ao ToastService (syn-toast renderiza). Fallback legado abaixo.
+  if (_litToast) { _litToast.toast(message, type); return; }
   const el = $('toast');
   const icon = type === 'success' ? '✓' : (type === 'error' ? '!' : '♪');
   el.innerHTML = `<span class="toast-ic">${icon}</span><span class="toast-msg"></span>`;
@@ -703,11 +705,23 @@ function openPlaylistsView() {
   $('playlistsView').querySelector('.ap-scroll').scrollTop = 0;
 }
 function closePlaylistsView() { closeViewAnimated($('playlistsView')); }
+let _plIntentsWired = false;
 function renderPlaylistsGrid() {
   const grid = $('plGrid');
+  const useLit = customElements.get('syn-playlist-card');
+  if (useLit && !_plIntentsWired) { // delegação: card Lit sobe syn:playlist:open
+    grid.addEventListener('syn:playlist:open', (e) => openPlaylistPage(e.detail.id));
+    _plIntentsWired = true;
+  }
   grid.innerHTML = '';
   for (const p of playlists) {
     const ps = playlistSongs(p);
+    if (useLit) {
+      const c = document.createElement('syn-playlist-card');
+      c.pid = p.id; c.name = p.name; c.sub = tn('count.track', p.tracks.length); c.coverHtml = playlistCoverHtml(ps);
+      grid.appendChild(c);
+      continue;
+    }
     const card = document.createElement('div');
     card.className = 'pl-card';
     const cover = document.createElement('div'); cover.className = 'pl-cover'; cover.innerHTML = playlistCoverHtml(ps);
@@ -771,14 +785,21 @@ function buildPlaylistRow(s, pSongs, index, id) {
   card.classList.add('pp-row');
   card.draggable = true;
 
-  const handle = document.createElement('span');
-  handle.className = 'pl-drag'; handle.innerHTML = ICONS.grip;
-  card.insertBefore(handle, card.firstChild);
-
-  const rm = document.createElement('button');
-  rm.className = 'pl-remove'; rm.title = t('playlists.removeTrack'); rm.innerHTML = ICONS.close;
-  rm.addEventListener('click', (e) => { e.stopPropagation(); removeFromPlaylist(id, s.filePath); });
-  card.appendChild(rm);
+  if (card.tagName === 'SYN-SONG-CARD') {
+    // ilha Lit: handle + remover vêm no TEMPLATE (modo row) — não injetar no light-DOM
+    // (o card re-renderiza ao carregar a capa e apagaria nós injetados).
+    card.vm = { ...card.vm, row: true };
+    card.addEventListener('syn:song:remove', () => removeFromPlaylist(id, s.filePath));
+  } else {
+    // legado (electron . sem bundler): injeta direto (DOM estável)
+    const handle = document.createElement('span');
+    handle.className = 'pl-drag'; handle.innerHTML = ICONS.grip;
+    card.insertBefore(handle, card.firstChild);
+    const rm = document.createElement('button');
+    rm.className = 'pl-remove'; rm.title = t('playlists.removeTrack'); rm.innerHTML = ICONS.close;
+    rm.addEventListener('click', (e) => { e.stopPropagation(); removeFromPlaylist(id, s.filePath); });
+    card.appendChild(rm);
+  }
 
   card.addEventListener('dragstart', () => { plDragFrom = index; card.classList.add('dragging'); });
   card.addEventListener('dragend', () => {
@@ -884,7 +905,39 @@ function openAddToPlaylistMenu(s, anchorEl) {
   setTimeout(() => { document.addEventListener('click', songMenuDocHandler); window.addEventListener('resize', closeSongMenu); }, 0);
 }
 
+// View-model do card p/ a ilha Lit (renderer prepara; o componente é view pura).
+function songVM(s) {
+  const synced = hasSyncContext && syncedKeys.has(keyOf(s));
+  return {
+    path: s.filePath,
+    title: s.title || s.fileName.replace(/\.mp3$/i, ''),
+    sub: songSubtitle(s),
+    src: coverUrl(s),
+    coverKnown: coverState.get(s.filePath),
+    deviceOnly: !!s.deviceOnly,
+    badge: s.deviceOnly
+      ? { kind: 'device', label: t('badges.onDevice'), title: t('badges.onDeviceTitle') }
+      : (hasSyncContext ? { kind: 'sync', synced, label: synced ? t('badges.syncedTitle') : t('badges.notSyncedTitle') } : null),
+  };
+}
+// Card Lit (light-DOM): mesma classe/data-path → CSS + querySelectors do renderer seguem.
+// Os intents reusam a orquestração existente com o closure (s, queueList).
+function buildSongCardLit(s, queueList) {
+  const el = document.createElement('syn-song-card');
+  el.vm = songVM(s);
+  el.t = t;
+  el.addEventListener('syn:song:play', () => {
+    if (current && current.filePath === s.filePath) togglePlay();
+    else { spawnPlayBurst(el); playFromCard(s, queueList); if (isDemoTrack(s)) revealDemoImmersive(); }
+  });
+  el.addEventListener('syn:song:menu', () => openSongMenu(s, el.querySelector('.song-menu')));
+  el.addEventListener('syn:song:cover', (e) => { coverState.set(s.filePath, e.detail.ok); if (e.detail.ok) applyPalette(el, e.detail.src); });
+  if (current && current.filePath === s.filePath) { el.classList.add('playing'); if (!isPlaying) el.classList.add('paused'); }
+  return el;
+}
+
 function buildSongCard(s, queueList) {
+  if (customElements.get('syn-song-card')) return buildSongCardLit(s, queueList);
   const card = document.createElement('div');
   card.className = 'song-card' + (s.deviceOnly ? ' device-only' : '');
   card.dataset.path = s.filePath;
@@ -953,10 +1006,20 @@ function buildSongCard(s, queueList) {
     badges.appendChild(b);
   } else if (hasSyncContext) {
     const synced = syncedKeys.has(keyOf(s));
-    const b = document.createElement('span');
-    b.className = 'sync-badge ' + (synced ? 'synced' : 'unsynced');
-    b.textContent = synced ? '✓' : '○';
-    b.title = synced ? t('badges.syncedTitle') : t('badges.notSyncedTitle');
+    const title = synced ? t('badges.syncedTitle') : t('badges.notSyncedTitle');
+    let b;
+    if (customElements.get('syn-sync-badge')) {
+      // ilha Lit (bundle): folha syn-sync-badge — props down (status/label)
+      b = document.createElement('syn-sync-badge');
+      b.status = synced ? 'synced' : 'unsynced';
+      b.label = title;
+    } else {
+      // fallback legado (electron . sem bundler): span equivalente
+      b = document.createElement('span');
+      b.className = 'sync-badge ' + (synced ? 'synced' : 'unsynced');
+      b.textContent = synced ? '✓' : '○';
+      b.title = title;
+    }
     badges.appendChild(b);
   }
 
@@ -2845,8 +2908,40 @@ function renderCrop() {
   cropImgEl.style.transform =
     `translate(${cropState.tx}px, ${cropState.ty}px) scale(${cropState.scale})`;
 }
+// Ilha Lit do cropper: substitui os controles legados (stage/zoom/ações) por <syn-cropper>.
+// Não consome context (só compõe syn-range) → monta direto, sem app-root. Guardado.
+let _litCropper = null;
+function ensureLitCropper() {
+  if (_litCropper) return;
+  const sheet = document.querySelector('#cropModal .crop-sheet');
+  if (!sheet) return;
+  // esconde os controles legados (ficam como fallback do `electron .`)
+  $('cropStage').style.display = 'none';
+  const ctrls = sheet.querySelector('.crop-controls'); if (ctrls) ctrls.style.display = 'none';
+  const actions = sheet.querySelector('.sheet-actions'); if (actions) actions.style.display = 'none';
+  const c = document.createElement('syn-cropper');
+  c.applyLabel = t('crop.apply');
+  c.cancelLabel = t('common.cancel');
+  c.addEventListener('syn:cover:crop', (e) => {
+    currentImageDataUrl = e.detail.dataUrl;
+    currentImagePath = null;
+    showCoverPreview(currentImageDataUrl);
+    closeCropper();
+  });
+  c.addEventListener('syn:cover:cancel', () => closeCropper());
+  sheet.appendChild(c);
+  _litCropper = c;
+}
+
 async function openCropper() {
   if (!coverSourceDataUrl) return;
+  // ilha Lit (bundle): o componente carrega/enquadra/recorta sozinho
+  if (customElements.get('syn-cropper')) {
+    ensureLitCropper();
+    _litCropper.src = coverSourceDataUrl;
+    $('cropModal').classList.remove('hidden', 'closing');
+    return;
+  }
   const img = await loadImage(coverSourceDataUrl);
   cropImgEl.src = coverSourceDataUrl;
   cropState.nw = img.naturalWidth;
@@ -2955,6 +3050,7 @@ $('settingsBtn').addEventListener('click', async () => {
   $('model').value = cfg.model || 'gemini-2.5-flash';
   $('downloadFolder').value = cfg.downloadFolder || '';
   try { $('appVersion').textContent = t('settings.version', { v: await window.api.getVersion() }); } catch {}
+  upgradeSettingsAccordion(); // troca as seções por <syn-setting-section> (no bundle); idempotente
   modal.classList.remove('hidden', 'closing');
 });
 $('browseFolder').addEventListener('click', async () => {
@@ -2969,11 +3065,38 @@ modal.addEventListener('click', (e) => { if (e.target === modal) closeViewAnimat
 // demais; clicar na já aberta a recolhe.
 $('settingsAcc').addEventListener('click', (e) => {
   const head = e.target.closest('.acc-head');
-  if (!head) return;
+  if (!head) return; // após o upgrade Lit não há .acc-head → no-op (o componente cuida do toggle)
   const item = head.parentElement;
   const wasOpen = item.classList.contains('open');
   $('settingsAcc').querySelectorAll('.acc-item.open').forEach((el) => el.classList.remove('open'));
   if (!wasOpen) item.classList.add('open');
+});
+
+// Upgrade guardado: troca cada .acc-item legado por <syn-setting-section>, MOVENDO o corpo
+// (.acc-body, com os inputs cujos IDs o renderer lê/escreve) p/ dentro do slot. O componente
+// passa a prover header + toggle. Idempotente. Sob `electron .` (sem Lit) → accordion legado.
+function upgradeSettingsAccordion() {
+  if (!customElements.get('syn-setting-section')) return;
+  const acc = $('settingsAcc');
+  if (!acc) return;
+  for (const item of [...acc.querySelectorAll(':scope > .acc-item')]) {
+    const span = item.querySelector('.acc-head span');
+    const body = item.querySelector('.acc-body');
+    if (!body) continue;
+    const sec = document.createElement('syn-setting-section');
+    sec.heading = span ? span.textContent : '';
+    sec.open = item.classList.contains('open');
+    while (body.firstChild) sec.appendChild(body.firstChild); // preserva os inputs (IDs)
+    acc.replaceChild(sec, item);
+  }
+}
+
+// Single-open (espelha o legado): ao abrir uma seção, fecha as demais.
+$('settingsAcc').addEventListener('syn:setting:toggle', (e) => {
+  if (!e.detail || !e.detail.open) return;
+  $('settingsAcc').querySelectorAll('syn-setting-section').forEach((s) => {
+    if (s !== e.target) s.open = false;
+  });
 });
 
 $('lastfmScrobbleEnabled').addEventListener('change', (e) => {
@@ -3109,6 +3232,7 @@ let eqFilters = null;
 let eqGains = [0, 0, 0, 0, 0, 0];
 let eqEnabled = false;
 let eqPresets = []; // presets do usuário
+let _litEq = null;  // ilha Lit do EQ (bandas+toggle), quando montada (bundle)
 
 function ensureAnalyser() {
   if (analyser) { if (audioCtx.state === 'suspended') audioCtx.resume(); return; }
@@ -3132,6 +3256,7 @@ function ensureAnalyser() {
     node.connect(analyser);
     analyser.connect(audioCtx.destination);
     freqData = new Uint8Array(analyser.frequencyBinCount);
+    if (_litViz) { _litViz.analyser = analyser; _litViz.freqData = freqData; }
     applyEq();
     audioCtx.resume();
   } catch { analyser = null; }
@@ -3274,14 +3399,17 @@ function updatePlayerMeta() {
   if (!current) return;
   const title = current.title || (current.fileName || '').replace(/\.mp3$/i, '') || '—';
   const artist = current.artist || '';
-  $('playerTitle').textContent = title;
-  $('playerArtist').textContent = artist;
-  setCoverEl($('playerCover'), current);
+  // player-half: null-guard (após o swap p/ syn-mini-player esses ids somem; a facade abaixo dirige)
+  { const e = $('playerTitle'); if (e) e.textContent = title; }
+  { const e = $('playerArtist'); if (e) e.textContent = artist; }
+  { const e = $('playerCover'); if (e) setCoverEl(e, current); }
   $('npTitle').textContent = title;
   $('npArtist').textContent = artist;
   setCoverEl($('npCover'), current);
   // tinge a UI com a cor da capa (null se sabidamente sem capa)
   applyNowColor(coverState.get(current.filePath) === false ? null : coverUrl(current));
+  // facade: estado discreto p/ os componentes do player (sub-passo 1 da Fase D)
+  if (_litPlayer) _litPlayer.setState({ title, artist, current, coverUrl: coverState.get(current.filePath) === false ? null : coverUrl(current) });
 }
 
 // cor dinâmica da capa atual: define a cor-alvo (barras interpolam até ela) e os
@@ -3298,6 +3426,7 @@ async function applyNowColor(dataUrl) {
   s.setProperty('--now-g', String(g));
   s.setProperty('--now-b', String(b));
   barTargetPal = { r, g, b, text: pal ? pal.text : '#ffffff' };
+  if (_litViz) _litViz.palette = barTargetPal; // o anel interpola até esta paleta
   // a paleta chega async: atualiza o accent dos acordes sem re-render (o rAF o consome)
   npChordAccent = chordAccentRGB(barTargetPal);
   const lyBox = $('npLyrics');
@@ -3306,8 +3435,9 @@ async function applyNowColor(dataUrl) {
 
 function updatePlayButton() {
   const ic = isPlaying ? ICONS.pause : ICONS.play;
-  $('playBtn').innerHTML = ic;
+  { const e = $('playBtn'); if (e) e.innerHTML = ic; }
   $('npPlay').innerHTML = ic;
+  if (_litPlayer) _litPlayer.setState({ isPlaying });
 }
 
 let loadSeq = 0; // protege contra trocas rápidas: descarta a faixa anterior
@@ -3464,18 +3594,21 @@ audio.addEventListener('timeupdate', () => {
   if (audio.duration) {
     if (!window.currentScrobbled && (audio.currentTime > audio.duration / 2 || audio.currentTime > 240)) {
       window.currentScrobbled = true;
-      const tArtist = $('playerArtist').textContent;
-      const tTitle = $('playerTitle').textContent;
-      if (tArtist && tArtist !== '—' && tTitle && tTitle !== '—') {
+      // lê do objeto `current` (não do DOM — o mini-player Lit não tem #playerArtist)
+      const tArtist = (current && current.artist) || '';
+      const tTitle = (current && (current.title || (current.fileName || '').replace(/\.mp3$/i, ''))) || '';
+      if (tArtist && tTitle) {
         window.api.lastfmScrobble({ artist: tArtist, title: tTitle, timestamp: window.currentScrobbleTimestamp });
       }
     }
     const pos = String(Math.round((audio.currentTime / audio.duration) * 1000));
     const t = fmtTime(audio.currentTime);
-    $('seek').value = pos; $('npSeek').value = pos;
-    $('curTime').textContent = t; $('npCur').textContent = t;
+    { const e = $('seek'); if (e) { e.value = pos; rangeFill(e); } } // player-half: null-guard (mini-player Lit gere o seek via rAF)
+    $('npSeek').value = pos;
+    { const e = $('curTime'); if (e) e.textContent = t; }
+    $('npCur').textContent = t;
     updateDurLabel();
-    rangeFill($('seek')); rangeFill($('npSeek'));
+    rangeFill($('npSeek'));
     if (npOpen() && $('nowPlaying').classList.contains('lyrics-mode')) updateKaraoke(audio.currentTime);
   }
 });
@@ -3493,8 +3626,9 @@ audio.addEventListener('error', () => {
 // ---- Controles (espelhados entre o mini-player e a Now Playing) ----
 function toggleShuffle() { shuffle = !shuffle; syncShuffleBtn(); }
 function syncShuffleBtn() {
-  $('shuffleBtn').classList.toggle('active', shuffle);
+  { const e = $('shuffleBtn'); if (e) e.classList.toggle('active', shuffle); }
   $('npShuffle').classList.toggle('active', shuffle);
+  if (_litPlayer) _litPlayer.setState({ shuffle });
 }
 function cycleRepeat() {
   repeatMode = repeatMode === 'off' ? 'all' : (repeatMode === 'all' ? 'one' : 'off');
@@ -3508,6 +3642,7 @@ function syncRepeatBtn() {
     const el = $(id);
     if (el) { el.classList.toggle('active', active); el.innerHTML = icon; el.title = title; }
   }
+  if (_litPlayer) _litPlayer.setState({ repeatMode });
 }
 function seekTo(v) {
   if (audio.duration) audio.currentTime = (v / 1000) * audio.duration;
@@ -3516,9 +3651,10 @@ function seekTo(v) {
 function setVolume(v) {
   if (!isFinite(v)) return;
   audio.volume = v;
-  $('vol').value = String(v); $('npVol').value = String(v);
-  rangeFill($('vol')); rangeFill($('npVol'));
+  { const e = $('vol'); if (e) { e.value = String(v); rangeFill(e); } }
+  $('npVol').value = String(v); rangeFill($('npVol'));
   try { localStorage.setItem('player.volume', String(v)); } catch { /* ok */ }
+  if (_litPlayer) _litPlayer.setState({ volume: v });
 }
 
 $('playBtn').addEventListener('click', togglePlay);
@@ -3528,7 +3664,7 @@ $('shuffleBtn').addEventListener('click', toggleShuffle);
 $('repeatBtn').addEventListener('click', cycleRepeat);
 $('seek').addEventListener('input', () => seekTo(parseInt($('seek').value, 10)));
 $('vol').addEventListener('input', () => setVolume(parseFloat($('vol').value)));
-$('playerClose').addEventListener('click', () => {
+function closePlayerAction() {
   audio.pause();
   $('player').classList.add('hidden');
   $('queuePanel').classList.add('hidden');
@@ -3536,7 +3672,8 @@ $('playerClose').addEventListener('click', () => {
   current = null; isPlaying = false;
   markPlayingCards();
   stopPlViz();
-});
+}
+$('playerClose').addEventListener('click', closePlayerAction);
 
 // ====================== Mini-player vivo (footer) ======================
 // Pulso de batida: a energia dos graves vira --beat (0..1), que acende a
@@ -3608,9 +3745,8 @@ let showRemaining = false;
 try { showRemaining = localStorage.getItem('player.showRemaining') === '1'; } catch { /* ok */ }
 function updateDurLabel() {
   if (!audio.duration) return;
-  $('durTime').textContent = showRemaining
-    ? '-' + fmtTime(audio.duration - audio.currentTime)
-    : fmtTime(audio.duration);
+  const e = $('durTime'); // some após o swap (o mini-player Lit gere seu próprio rótulo)
+  if (e) e.textContent = showRemaining ? '-' + fmtTime(audio.duration - audio.currentTime) : fmtTime(audio.duration);
 }
 $('durTime').addEventListener('click', (e) => {
   e.stopPropagation();
@@ -3697,6 +3833,7 @@ function closeNowPlaying() {
   hideNpPanels(); // EQ/fila imersivos não sobrevivem fora da NP
   stopNpViz();
   stopLyricScroll();
+  { const ly = litLyricsEl(); if (ly) ly.active = false; } // para o rAF da ilha Lit ao fechar
   npStopIdle();
   if (npIsFullscreen) toggleNpFullscreen(); // sai da tela cheia ao recolher
 }
@@ -3789,7 +3926,8 @@ $('npEqBtn').addEventListener('click', () => {
   if (show) {
     p.classList.remove('hidden', 'closing');
     p.classList.add('np-mode');
-    renderEqBands(); renderEqPresetOptions();
+    if (customElements.get('syn-eq')) { ensureLitEq(); syncLitEq(); } else renderEqBands();
+    renderEqPresetOptions();
   }
 });
 
@@ -3844,12 +3982,17 @@ function drawNpViz() {
   npVizRAF = requestAnimationFrame(drawNpViz);
 }
 function startNpViz() {
-  if (npVizRAF) return;
   ensureAnalyser();
+  // sempre re-injeta (cobre o early-return do ensureAnalyser quando o analyser já existia)
+  if (_litViz) { _litViz.analyser = analyser; _litViz.freqData = freqData; _litViz.active = true; return; }
+  if (npVizRAF) return;
   sizeNpViz();
   npVizRAF = requestAnimationFrame(drawNpViz);
 }
-function stopNpViz() { if (npVizRAF) { cancelAnimationFrame(npVizRAF); npVizRAF = null; } }
+function stopNpViz() {
+  if (_litViz) _litViz.active = false;
+  if (npVizRAF) { cancelAnimationFrame(npVizRAF); npVizRAF = null; }
+}
 // liga/desliga o anel conforme estado de reprodução enquanto a NP está aberta
 function syncNpViz() {
   if (!npOpen()) { stopNpViz(); return; }
@@ -3891,6 +4034,72 @@ async function loadCurrentLyrics(filePath) {
   npChordsDirty = false; npSelChordEl = null; // estado de edição zera ao trocar de faixa
   renderNpLyrics();
 }
+
+// ====================== Ilha Lit (Fase 0): karaokê de acordes ======================
+// Prova da arquitetura por ilhas (FRONTEND-MIGRATION.md §0). COEXISTE com o karaokê
+// legado — a remoção do antigo é Fase E, só após paridade. Ativa apenas no caminho
+// BUNDLADO (electron-vite dev/build/prod): sob `electron .` o renderer roda sem bundler,
+// o import dinâmico de 'lit' falha → cai no catch → o legado segue sozinho, sem regressão.
+// Carrega a camada Lit (ilhas + folhas) cedo, p/ os custom elements já estarem registrados
+// quando os cards/painéis renderizam. Guardado: sob `electron .` (sem bundler) o import de
+// 'lit' falha → resolve null → os usos caem no fallback legado, sem regressão. No bundle
+// (electron-vite dev/prod) registra e os usos passam a renderizar via Lit.
+const _litReady = import('./components/index.js').catch(() => null);
+
+// Toast via ilha Lit: monta UM <syn-app-root> global (provê os serviços) com <syn-toast>
+// dentro. O toast() legado encaminha pro ToastService quando a ilha está ativa (bundle);
+// sob `electron .` (sem bundler) _litReady = null → toast() usa o DOM legado.
+let _litToast = null;
+let _litPlayer = null; // facade do player (Fase D): o renderer sincroniza estado aqui
+let _litViz = null;    // visualizer Lit (Fase E): recebe analyser/freqData/coverEl/palette/active
+_litReady.then((m) => {
+  if (!m || !customElements.get('syn-toast')) return;
+  try {
+    const root = document.createElement('syn-app-root');
+    root.appendChild(document.createElement('syn-toast'));
+    document.body.appendChild(root);
+    _litToast = (root.services && root.services.toast) || null;
+    // PlayerService como fonte única de estado: liga o <audio> real + estado inicial.
+    _litPlayer = (root.services && root.services.player) || null;
+    if (_litPlayer) {
+      _litPlayer.audio = audio;
+      _litPlayer.setState({ volume: audio.volume, shuffle, repeatMode });
+      // transporte: a facade delega às funções existentes do renderer
+      _litPlayer.controls = {
+        toggle: togglePlay, next: playNext, prev: playPrev,
+        shuffle: toggleShuffle, repeat: cycleRepeat,
+        seek: seekTo, setVolume,
+        openNowPlaying, toggleEq: toggleEqPanel, toggleQueue: toggleQueuePanel, closePlayer: closePlayerAction,
+      };
+      // monta o mini-player Lit NO LUGAR do #player legado (vira o próprio #player)
+      if (customElements.get('syn-mini-player')) {
+        const legacy = document.getElementById('player');
+        if (legacy && legacy.tagName !== 'SYN-MINI-PLAYER') {
+          const mp = document.createElement('syn-mini-player');
+          mp.id = 'player';
+          mp.className = legacy.className; // preserva 'player hidden'
+          mp.player = _litPlayer; mp.t = t;
+          legacy.replaceWith(mp);
+          if (current) _litPlayer.setState({ title: current.title || '', artist: current.artist || '', current });
+        }
+      }
+    }
+    // visualizer Lit (Fase E): substitui o <canvas id=npViz> pela ilha (mesma classe .np-viz)
+    if (customElements.get('syn-visualizer')) {
+      const oldViz = document.getElementById('npViz');
+      if (oldViz && oldViz.tagName === 'CANVAS') {
+        if (npVizRAF) { cancelAnimationFrame(npVizRAF); npVizRAF = null; } // para o loop legado antes de trocar o canvas
+        const v = document.createElement('syn-visualizer');
+        v.coverEl = document.getElementById('npCover');
+        if (analyser) { v.analyser = analyser; v.freqData = freqData; } // se já criado
+        v.palette = barTargetPal;
+        oldViz.replaceWith(v);
+        _litViz = v;
+        if (typeof npOpen === 'function' && npOpen() && isPlaying) v.active = true; // já tocando c/ NP aberta
+      }
+    }
+  } catch { _litToast = null; }
+});
 
 // Recuo lateral (px) da faixa útil de acordes: garante que acordes em f=0 e f=1 fiquem
 // visíveis (sem clipping) SEM clampar a posição — o que quebraria a coincidência
@@ -3971,9 +4180,50 @@ function updateChordsBtn() {
   }
 }
 
+// ---- Karaokê via ilha Lit (<syn-lyrics>) ----------------------------------------------
+// COEXISTE com o motor legado abaixo (paridade, sem regressão). Usa a ilha quando ela está
+// registrada (caminho bundlado) E não está no modo de EDIÇÃO inline de acordes — a edição
+// (advancedEdit) depende da camada de gestos sobre os .np-chord legados, cuja migração é um
+// sub-passo posterior; nesse modo cai no legado. <syn-lyrics> vive DENTRO do #npLyrics e
+// reusa toda a CSS .np-lyrics-* (light-DOM); o renderer só lhe entrega o estado (props down).
+function useLitLyrics() { return !!customElements.get('syn-lyrics') && !advancedEdit; }
+function litLyricsEl() { const box = $('npLyrics'); return box ? box.querySelector(':scope > syn-lyrics') : null; }
+// liga/desliga o rAF da ilha conforme o karaokê está visível (NP aberta + lyrics-mode)
+function syncLitLyrics() { const ly = litLyricsEl(); if (ly) ly.active = npOpen() && $('nowPlaying').classList.contains('lyrics-mode'); }
+
+function renderNpLyricsLit(box) {
+  const synced = !!(npLyricsLines && npLyricsLines.length);
+  const allChords = (npChordsLines || []).filter((c) => c.text);
+  const trackHasChords = allChords.length > 0;
+  const hasChords = trackHasChords && npShowChords;
+  updateChordsBtn();
+  npLyricSlots = hasChords ? 6 : 5;
+  const showTrack = synced || hasChords;
+  box.classList.toggle('synced', showTrack);
+  box.classList.toggle('chords-on', hasChords);
+  box.classList.toggle('edit-mode', false); // edição inline = caminho legado
+  $('nowPlaying').classList.toggle('np-synced', showTrack);
+  npChordAccent = chordAccentRGB(barTargetPal);
+  box.style.setProperty('--chord-accent', npChordAccent.join(','));
+  // motor legado inerte: sem âncoras, updateKaraoke/lyricFrame/syncLyricScroll viram no-op
+  npLyricAnchors = []; npLyricTrack = null; npLastCenter = null; npSelChordEl = null;
+
+  let ly = box.querySelector(':scope > syn-lyrics');
+  if (!ly) { box.innerHTML = ''; ly = document.createElement('syn-lyrics'); box.appendChild(ly); }
+  ly.t = t;
+  ly.player = _litPlayer;                       // facade por propriedade (fora do app-root)
+  ly.accent = npChordAccent.join(',');
+  ly.synced = npLyricsLines;
+  ly.chordsData = npChordsLines || [];
+  ly.showChords = npShowChords;
+  ly.plain = npLyricsPlain || '';
+  ly.active = npOpen() && $('nowPlaying').classList.contains('lyrics-mode');
+}
+
 function renderNpLyrics() {
   const box = $('npLyrics');
   if (!box) return;
+  if (useLitLyrics()) { renderNpLyricsLit(box); return; }
   box.innerHTML = '';
   npLastCenter = null; npLyricAnchors = []; npLyricTrack = null; npLyricLastTop = -1;
   npSelChordEl = null; // os elementos são recriados; evita referência a acorde destacado órfão
@@ -4268,6 +4518,7 @@ function stopLyricScroll() {
 }
 // liga a rolagem quando a letra sincronizada está visível na Now Playing; senão desliga
 function syncLyricScroll() {
+  syncLitLyrics(); // ilha Lit: (des)ativa o próprio rAF nas mesmas transições
   const on = npOpen() && $('nowPlaying').classList.contains('lyrics-mode') && npLyricAnchors.length > 0;
   if (on) startLyricScroll(); else stopLyricScroll();
 }
@@ -4485,12 +4736,14 @@ async function saveChordsInline() {
 })();
 
 // ---- Fila (painel) ----
-$('queueBtn').addEventListener('click', () => {
+function toggleQueuePanel() {
+  $('eqPanel').classList.add('hidden'); // fila e EQ não coexistem
   const p = $('queuePanel');
   p.classList.remove('np-mode'); // aberto pelo mini-player usa o visual padrão
   p.classList.toggle('hidden');
   if (!p.classList.contains('hidden')) renderQueue();
-});
+}
+$('queueBtn').addEventListener('click', toggleQueuePanel);
 $('queueClose').addEventListener('click', () => { $('queuePanel').classList.add('hidden'); $('queuePanel').classList.remove('np-mode'); });
 
 let queueDragFrom = -1;
@@ -4498,44 +4751,60 @@ function renderQueue() {
   if ($('queuePanel').classList.contains('hidden')) return;
   const list = $('queueList');
   list.innerHTML = '';
+  const useLit = customElements.get('syn-queue-item');
   queue.forEach((s, i) => {
-    const item = document.createElement('div');
-    item.className = 'queue-item' + (i === queueIndex ? ' current' : '');
-    const thumb = document.createElement('div');
-    thumb.className = 'qi-thumb';
-    if (coverState.get(s.filePath) === false) {
-      thumb.textContent = '♪';
+    let item;
+    if (useLit) {
+      // ilha Lit: item dirigido por VM; intents → orquestração existente (closure i)
+      item = document.createElement('syn-queue-item');
+      item.t = t;
+      item.vm = {
+        path: s.filePath,
+        title: s.title || (s.fileName || '').replace(/\.mp3$/i, ''),
+        artist: s.artist || '',
+        src: coverUrl(s),
+        coverKnown: coverState.get(s.filePath),
+        current: i === queueIndex,
+      };
+      item.addEventListener('syn:queue:jump', () => playAt(i));
+      item.addEventListener('syn:queue:remove', () => removeFromQueue(i));
+      item.addEventListener('syn:queue:cover', () => coverState.set(s.filePath, false));
     } else {
-      const qImg = document.createElement('img');
-      qImg.alt = ''; qImg.loading = 'lazy';
-      qImg.onerror = () => { coverState.set(s.filePath, false); thumb.textContent = '♪'; };
-      qImg.src = coverUrl(s);
-      thumb.appendChild(qImg);
+      item = document.createElement('div');
+      item.className = 'queue-item' + (i === queueIndex ? ' current' : '');
+      const thumb = document.createElement('div');
+      thumb.className = 'qi-thumb';
+      if (coverState.get(s.filePath) === false) {
+        thumb.textContent = '♪';
+      } else {
+        const qImg = document.createElement('img');
+        qImg.alt = ''; qImg.loading = 'lazy';
+        qImg.onerror = () => { coverState.set(s.filePath, false); thumb.textContent = '♪'; };
+        qImg.src = coverUrl(s);
+        thumb.appendChild(qImg);
+      }
+      const text = document.createElement('div');
+      text.className = 'qi-text';
+      const qt = document.createElement('div');
+      qt.className = 'qi-title';
+      qt.textContent = s.title || (s.fileName || '').replace(/\.mp3$/i, '');
+      const a = document.createElement('div');
+      a.className = 'qi-artist';
+      a.textContent = s.artist || '';
+      text.append(qt, a);
+      item.append(thumb, text);
+      if (i !== queueIndex) {
+        const rm = document.createElement('button');
+        rm.className = 'qi-remove';
+        rm.title = t('player.removeFromQueue');
+        rm.innerHTML = ICONS.close;
+        rm.addEventListener('click', (ev) => { ev.stopPropagation(); removeFromQueue(i); });
+        item.appendChild(rm);
+      }
+      item.addEventListener('click', () => playAt(i));
     }
-    const text = document.createElement('div');
-    text.className = 'qi-text';
-    const qt = document.createElement('div');
-    qt.className = 'qi-title';
-    qt.textContent = s.title || (s.fileName || '').replace(/\.mp3$/i, '');
-    const a = document.createElement('div');
-    a.className = 'qi-artist';
-    a.textContent = s.artist || '';
-    text.append(qt, a);
-    item.append(thumb, text);
 
-    // remover da fila (exceto a faixa atual)
-    if (i !== queueIndex) {
-      const rm = document.createElement('button');
-      rm.className = 'qi-remove';
-      rm.title = t('player.removeFromQueue');
-      rm.innerHTML = ICONS.close;
-      rm.addEventListener('click', (ev) => { ev.stopPropagation(); removeFromQueue(i); });
-      item.appendChild(rm);
-    }
-
-    item.addEventListener('click', () => playAt(i));
-
-    // reordenação por arraste
+    // reordenação por arraste (igual nos dois caminhos)
     item.draggable = true;
     item.addEventListener('dragstart', () => { queueDragFrom = i; item.classList.add('dragging'); });
     item.addEventListener('dragend', () => {
@@ -4623,9 +4892,9 @@ window.addEventListener('resize', () => { if (npOpen()) { sizeNpViz(); if (npLyr
   try { const s = localStorage.getItem('player.volume'); if (s != null) v = parseFloat(s); } catch { /* ok */ }
   if (!isFinite(v)) v = 1;
   audio.volume = v;
-  $('vol').value = String(v);
+  { const e = $('vol'); if (e) { e.value = String(v); rangeFill(e); } }
   $('npVol').value = String(v);
-  rangeFill($('vol')); rangeFill($('npVol'));
+  rangeFill($('npVol'));
 })();
 
 applyPlayerIcons();
@@ -4685,6 +4954,31 @@ function renderEqBands() {
   });
 }
 
+// Ilha Lit do EQ: <syn-eq> (bandas + toggle + zerar) substitui #eqBands/#eqEnabled/#eqFlat.
+// Os presets/save seguem legados (o componente não os cobre). Eventos fiam no estado/Web
+// Audio existente (eqGains/applyEq/persistEqState). Guardado: sob `electron .` → bandas legadas.
+function ensureLitEq() {
+  if (_litEq || !customElements.get('syn-eq')) return;
+  const box = $('eqBands');
+  if (!box) return;
+  box.innerHTML = '';
+  box.style.display = 'block'; // .eq-bands legado é flex → o syn-eq (item único) encolheria; block faz preencher
+  // modo `bare`: só as 6 bandas. Título/toggle/zerar/presets ficam no painel legado
+  // (evita header/controles duplicados → enquadramento limpo).
+  const eq = document.createElement('syn-eq');
+  eq.bare = true;
+  eq.addEventListener('syn:eq:change', (e) => {
+    eqGains = e.detail.gains.slice();
+    // auto-liga ao mexer numa banda p/ valor != 0 (espelha o legado)
+    if (!eqEnabled && eqGains.some((g) => g !== 0)) { eqEnabled = true; $('eqEnabled').checked = true; applyEq(); }
+    applyEq();
+    persistEqState();
+  });
+  box.appendChild(eq);
+  _litEq = eq;
+}
+function syncLitEq() { if (_litEq) { _litEq.gains = eqGains.slice(); _litEq.enabled = eqEnabled; } }
+
 function renderEqPresetOptions() {
   const sel = $('eqPreset');
   sel.innerHTML = '';
@@ -4712,21 +5006,22 @@ function loadEqPreset(gains, enable) {
   while (eqGains.length < 6) eqGains.push(0);
   if (enable) { eqEnabled = true; $('eqEnabled').checked = true; }
   applyEq();
-  renderEqBands();
+  if (_litEq) syncLitEq(); else renderEqBands();
   persistEqState();
 }
 
-$('eqBtn').addEventListener('click', () => {
+function toggleEqPanel() {
   if (blockedDuringLyricsEdit()) return;
   const p = $('eqPanel');
   p.classList.remove('np-mode'); // aberto pelo mini-player usa o visual padrão
   p.classList.toggle('hidden');
   if (!p.classList.contains('hidden')) {
     $('queuePanel').classList.add('hidden');
-    renderEqBands();
+    if (customElements.get('syn-eq')) { ensureLitEq(); syncLitEq(); } else renderEqBands();
     renderEqPresetOptions();
   }
-});
+}
+$('eqBtn').addEventListener('click', toggleEqPanel);
 $('eqClose').addEventListener('click', () => { $('eqPanel').classList.add('hidden'); $('eqPanel').classList.remove('np-mode'); });
 $('eqEnabled').addEventListener('change', () => {
   eqEnabled = $('eqEnabled').checked;
@@ -5374,7 +5669,40 @@ function buildDeviceRow(d) {
   return row;
 }
 
+// Builder guardado: <syn-device> (Lit, light-DOM) no bundle; buildDeviceRow legado sob `electron .`.
+// O host vira .device-row[data-serial] → CSS global + helpers por-serial (capacidade/progresso) seguem.
+function buildDeviceEl(d) {
+  if (!customElements.get('syn-device')) return buildDeviceRow(d);
+  deviceConnInfo[d.serial] = { free: d.free, size: d.size, connected: d.connected };
+  const el = document.createElement('syn-device');
+  el.device = d;
+  el.stats = deviceStats[d.serial] || null;
+  el.artists = libraryArtists();
+  el.t = t; el.tn = tn;
+  return el;
+}
+
+// Intents do syn-device → orquestração existente. Delegado no modal (eventos bubbles+composed).
+let _devIntentsWired = false;
+function wireDeviceIntents() {
+  if (_devIntentsWired) return;
+  _devIntentsWired = true;
+  const modal = $('devicesModal');
+  modal.addEventListener('syn:device:nick', (e) => window.api.devicesUpdate({ serial: e.detail.serial, nickname: e.detail.nickname }));
+  modal.addEventListener('syn:device:sync-toggle', async (e) => {
+    const { serial, enabled, connected, nickname, label } = e.detail;
+    await window.api.devicesUpdate({ serial, syncEnabled: enabled });
+    await renderDevices();
+    if (enabled && connected) runScanAndSync({ serial, nickname, label, configured: true, syncEnabled: true });
+    else if (!enabled && activeDevice && activeDevice.serial === serial) { activeDevice = null; deviceOnlySongs = []; renderList(); }
+  });
+  modal.addEventListener('syn:device:scope', (e) => { persistScope(e.detail.serial, e.detail.scope); refreshDeviceStats(e.detail.serial); });
+  modal.addEventListener('syn:device:ignore', async (e) => { await window.api.devicesUpdate({ serial: e.detail.serial, ignored: e.detail.ignored }); await renderDevices(); });
+  modal.addEventListener('syn:device:sync-now', (e) => runScanAndSync({ serial: e.detail.serial, nickname: e.detail.nickname, label: e.detail.label, configured: true, syncEnabled: true }));
+}
+
 async function renderDevices() {
+  wireDeviceIntents();
   const res = await window.api.devicesList();
   const devices = (res && res.devices) || [];
   const active = devices.filter((d) => !d.ignored);
@@ -5385,13 +5713,13 @@ async function renderDevices() {
   // conectados primeiro, depois por apelido/rótulo
   active.sort((a, b) => (b.connected - a.connected) ||
     (a.nickname || a.label || '').localeCompare(b.nickname || b.label || '', t('meta.locale')));
-  for (const d of active) list.appendChild(buildDeviceRow(d));
+  for (const d of active) list.appendChild(buildDeviceEl(d));
 
   $('deviceEmpty').classList.toggle('hidden', active.length > 0 || ignored.length > 0);
 
   const igList = $('ignoredList');
   igList.innerHTML = '';
-  for (const d of ignored) igList.appendChild(buildDeviceRow(d));
+  for (const d of ignored) igList.appendChild(buildDeviceEl(d));
   $('toggleIgnored').classList.toggle('hidden', ignored.length === 0);
   $('toggleIgnored').textContent = showingIgnored ? t('devices.hideIgnored') : t('devices.showIgnored');
   igList.classList.toggle('hidden', !showingIgnored);

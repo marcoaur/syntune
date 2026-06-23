@@ -7,9 +7,16 @@
  * @deps    electron (contextBridge, ipcRenderer, webUtils)
  * @notes   Toda nova IPC precisa de handler em main.js E método exposto aqui.
  */
+// @ts-check
 const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
-contextBridge.exposeInMainWorld('api', {
+/**
+ * Implementação do contrato renderer↔main. Tipada contra IpcApi: se um canal divergir do
+ * contrato (src/ipc/contract.js), o tsc/editor acusa aqui — preload e ApiService não saem
+ * de sincronia silenciosamente.
+ * @type {import('./src/ipc/contract.js').IpcApi}
+ */
+const api = {
   // controles da janela
   minimize: () => ipcRenderer.send('window:minimize'),
   close: () => ipcRenderer.send('window:close'),
@@ -105,4 +112,6 @@ contextBridge.exposeInMainWorld('api', {
 
   // resolve o caminho absoluto de um arquivo arrastado para a janela
   getFilePath: (file) => webUtils.getPathForFile(file)
-});
+};
+
+contextBridge.exposeInMainWorld('api', api);
