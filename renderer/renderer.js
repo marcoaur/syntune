@@ -2822,36 +2822,15 @@ async function executeDelete(where) {
 }
 
 // ====================== Cropper de capa ======================
-const CROP_BOX = 300;
-const CROP_OUT = 640;
-const cropState = {
-  scale: 1, coverScale: 1, tx: 0, ty: 0, nw: 0, nh: 0,
-  dragging: false, startX: 0, startY: 0, startTx: 0, startTy: 0
-};
-const cropImgEl = $('cropImg');
-const cropStageEl = $('cropStage');
-const cropZoomEl = $('cropZoom');
-
-function clampCropOffsets() {
-  const dispW = cropState.nw * cropState.scale;
-  const dispH = cropState.nh * cropState.scale;
-  cropState.tx = Math.min(0, Math.max(CROP_BOX - dispW, cropState.tx));
-  cropState.ty = Math.min(0, Math.max(CROP_BOX - dispH, cropState.ty));
-}
-function renderCrop() {
-  clampCropOffsets();
-  cropImgEl.style.transform =
-    `translate(${cropState.tx}px, ${cropState.ty}px) scale(${cropState.scale})`;
-}
-// Ilha Lit do cropper: substitui os controles legados (stage/zoom/ações) por <syn-cropper>.
-// Não consome context (só compõe syn-range) → monta direto, sem app-root. Guardado.
+// Cropper = ilha Lit <syn-cropper> (carrega/enquadra/recorta sozinha). Não consome context
+// (só compõe syn-range) → monta direto no #cropModal, sem app-root.
 let _litCropper = null;
 function ensureLitCropper() {
   if (_litCropper) return;
   const sheet = document.querySelector('#cropModal .crop-sheet');
   if (!sheet) return;
-  // esconde os controles legados (ficam como fallback do `electron .`)
-  $('cropStage').style.display = 'none';
+  // esconde os controles legados do #cropModal (markup removido no cluster F)
+  const stage = $('cropStage'); if (stage) stage.style.display = 'none';
   const ctrls = sheet.querySelector('.crop-controls'); if (ctrls) ctrls.style.display = 'none';
   const actions = sheet.querySelector('.sheet-actions'); if (actions) actions.style.display = 'none';
   const c = document.createElement('syn-cropper');
@@ -2868,77 +2847,15 @@ function ensureLitCropper() {
   _litCropper = c;
 }
 
-async function openCropper() {
+function openCropper() {
   if (!coverSourceDataUrl) return;
-  // ilha Lit (bundle): o componente carrega/enquadra/recorta sozinho
-  if (customElements.get('syn-cropper')) {
-    ensureLitCropper();
-    _litCropper.src = coverSourceDataUrl;
-    $('cropModal').classList.remove('hidden', 'closing');
-    return;
-  }
-  const img = await loadImage(coverSourceDataUrl);
-  cropImgEl.src = coverSourceDataUrl;
-  cropState.nw = img.naturalWidth;
-  cropState.nh = img.naturalHeight;
-  cropState.coverScale = Math.max(CROP_BOX / cropState.nw, CROP_BOX / cropState.nh);
-  cropState.scale = cropState.coverScale;
-  cropZoomEl.value = '1';
-  cropState.tx = (CROP_BOX - cropState.nw * cropState.scale) / 2;
-  cropState.ty = (CROP_BOX - cropState.nh * cropState.scale) / 2;
-  renderCrop();
+  // ilha Lit syn-cropper: o componente carrega/enquadra/recorta sozinho
+  ensureLitCropper();
+  _litCropper.src = coverSourceDataUrl;
   $('cropModal').classList.remove('hidden', 'closing');
 }
 function closeCropper() { closeViewAnimated($('cropModal')); }
 
-cropZoomEl.addEventListener('input', () => {
-  const zoom = parseFloat(cropZoomEl.value) || 1;
-  const newScale = cropState.coverScale * zoom;
-  const cx = CROP_BOX / 2, cy = CROP_BOX / 2;
-  const imgX = (cx - cropState.tx) / cropState.scale;
-  const imgY = (cy - cropState.ty) / cropState.scale;
-  cropState.scale = newScale;
-  cropState.tx = cx - imgX * newScale;
-  cropState.ty = cy - imgY * newScale;
-  renderCrop();
-});
-cropStageEl.addEventListener('pointerdown', (e) => {
-  cropState.dragging = true;
-  cropState.startX = e.clientX; cropState.startY = e.clientY;
-  cropState.startTx = cropState.tx; cropState.startTy = cropState.ty;
-  cropStageEl.setPointerCapture(e.pointerId);
-});
-cropStageEl.addEventListener('pointermove', (e) => {
-  if (!cropState.dragging) return;
-  cropState.tx = cropState.startTx + (e.clientX - cropState.startX);
-  cropState.ty = cropState.startTy + (e.clientY - cropState.startY);
-  renderCrop();
-});
-const endDrag = () => { cropState.dragging = false; };
-cropStageEl.addEventListener('pointerup', endDrag);
-cropStageEl.addEventListener('pointercancel', endDrag);
-cropStageEl.addEventListener('wheel', (e) => {
-  e.preventDefault();
-  const step = e.deltaY < 0 ? 0.06 : -0.06;
-  const z = Math.min(3, Math.max(1, (parseFloat(cropZoomEl.value) || 1) + step));
-  cropZoomEl.value = String(z);
-  cropZoomEl.dispatchEvent(new Event('input'));
-}, { passive: false });
-
-$('cropApply').addEventListener('click', () => {
-  const canvas = document.createElement('canvas');
-  canvas.width = CROP_OUT; canvas.height = CROP_OUT;
-  const ctx = canvas.getContext('2d');
-  const sBox = CROP_BOX / cropState.scale;
-  const sx = -cropState.tx / cropState.scale;
-  const sy = -cropState.ty / cropState.scale;
-  ctx.drawImage(cropImgEl, sx, sy, sBox, sBox, 0, 0, CROP_OUT, CROP_OUT);
-  currentImageDataUrl = canvas.toDataURL('image/jpeg', 0.92);
-  currentImagePath = null;
-  showCoverPreview(currentImageDataUrl);
-  closeCropper();
-});
-$('cropCancel').addEventListener('click', closeCropper);
 $('cropModal').addEventListener('click', (e) => { if (e.target === $('cropModal')) closeCropper(); });
 
 // ====================== Configurações ======================
@@ -3007,11 +2924,10 @@ $('settingsAcc').addEventListener('click', (e) => {
   if (!wasOpen) item.classList.add('open');
 });
 
-// Upgrade guardado: troca cada .acc-item legado por <syn-setting-section>, MOVENDO o corpo
-// (.acc-body, com os inputs cujos IDs o renderer lê/escreve) p/ dentro do slot. O componente
-// passa a prover header + toggle. Idempotente. Sob `electron .` (sem Lit) → accordion legado.
+// Troca cada .acc-item legado por <syn-setting-section>, MOVENDO o corpo (.acc-body, com os
+// inputs cujos IDs o renderer lê/escreve) p/ dentro do slot. O componente provê header +
+// toggle. Idempotente.
 function upgradeSettingsAccordion() {
-  if (!customElements.get('syn-setting-section')) return;
   const acc = $('settingsAcc');
   if (!acc) return;
   for (const item of [...acc.querySelectorAll(':scope > .acc-item')]) {
@@ -4706,60 +4622,23 @@ function renderQueue() {
   if ($('queuePanel').classList.contains('hidden')) return;
   const list = $('queueList');
   list.innerHTML = '';
-  const useLit = customElements.get('syn-queue-item');
   queue.forEach((s, i) => {
-    let item;
-    if (useLit) {
-      // ilha Lit: item dirigido por VM; intents → orquestração existente (closure i)
-      item = document.createElement('syn-queue-item');
-      item.t = t;
-      item.vm = {
-        path: s.filePath,
-        title: s.title || (s.fileName || '').replace(/\.mp3$/i, ''),
-        artist: s.artist || '',
-        src: coverUrl(s),
-        coverKnown: coverState.get(s.filePath),
-        current: i === queueIndex,
-      };
-      item.addEventListener('syn:queue:jump', () => playAt(i));
-      item.addEventListener('syn:queue:remove', () => removeFromQueue(i));
-      item.addEventListener('syn:queue:cover', () => coverState.set(s.filePath, false));
-    } else {
-      item = document.createElement('div');
-      item.className = 'queue-item' + (i === queueIndex ? ' current' : '');
-      const thumb = document.createElement('div');
-      thumb.className = 'qi-thumb';
-      if (coverState.get(s.filePath) === false) {
-        thumb.textContent = '♪';
-      } else {
-        const qImg = document.createElement('img');
-        qImg.alt = ''; qImg.loading = 'lazy';
-        qImg.onerror = () => { coverState.set(s.filePath, false); thumb.textContent = '♪'; };
-        qImg.src = coverUrl(s);
-        thumb.appendChild(qImg);
-      }
-      const text = document.createElement('div');
-      text.className = 'qi-text';
-      const qt = document.createElement('div');
-      qt.className = 'qi-title';
-      qt.textContent = s.title || (s.fileName || '').replace(/\.mp3$/i, '');
-      const a = document.createElement('div');
-      a.className = 'qi-artist';
-      a.textContent = s.artist || '';
-      text.append(qt, a);
-      item.append(thumb, text);
-      if (i !== queueIndex) {
-        const rm = document.createElement('button');
-        rm.className = 'qi-remove';
-        rm.title = t('player.removeFromQueue');
-        rm.innerHTML = ICONS.close;
-        rm.addEventListener('click', (ev) => { ev.stopPropagation(); removeFromQueue(i); });
-        item.appendChild(rm);
-      }
-      item.addEventListener('click', () => playAt(i));
-    }
+    // ilha Lit syn-queue-item: dirigida por VM; intents → orquestração existente (closure i)
+    const item = document.createElement('syn-queue-item');
+    item.t = t;
+    item.vm = {
+      path: s.filePath,
+      title: s.title || (s.fileName || '').replace(/\.mp3$/i, ''),
+      artist: s.artist || '',
+      src: coverUrl(s),
+      coverKnown: coverState.get(s.filePath),
+      current: i === queueIndex,
+    };
+    item.addEventListener('syn:queue:jump', () => playAt(i));
+    item.addEventListener('syn:queue:remove', () => removeFromQueue(i));
+    item.addEventListener('syn:queue:cover', () => coverState.set(s.filePath, false));
 
-    // reordenação por arraste (igual nos dois caminhos)
+    // reordenação por arraste
     item.draggable = true;
     item.addEventListener('dragstart', () => { queueDragFrom = i; item.classList.add('dragging'); });
     item.addEventListener('dragend', () => {
