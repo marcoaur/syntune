@@ -343,8 +343,12 @@ ipcMain.handle('i18n:setLanguage', (_e, lang) => {
   if (v && langs.includes(v)) cfg.language = v;
   else delete cfg.language;
   writeConfig(cfg);
-  app.relaunch();
-  app.exit(0);
+  // Re-inicializa o i18n (novo dicionário) e RECARREGA o renderer. Antes era
+  // app.relaunch()+exit, que sob `npm run dev` (electron-vite) matava o processo →
+  // o dev-server caía junto → o relançado abria numa tela vazia. O reload funciona
+  // em dev E prod sem derrubar nada: o renderer re-busca getI18n() no boot.
+  i18n.init({ locale: app.getLocale(), readConfig, writeConfig });
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.reload();
 });
 
 // ---------- IPC: configuração ----------
