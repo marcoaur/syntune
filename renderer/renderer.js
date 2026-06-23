@@ -3136,9 +3136,7 @@ let npLyricsPath = null;    // arquivo cujas letras estão carregadas
 let npLastCenter = null;
 // âncoras de tempo→posição p/ rolagem contínua: [{ t, el }] (linhas + interlúdios)
 let npLyricAnchors = [];
-let npLyricTrack = null;    // wrapper das linhas, animado via transform (GPU)
-let npLyricTrackTop = 0;    // offsetTop do wrapper dentro da janela (padding superior)
-let npLyricMaxTop = 0;      // limite inferior da rolagem
+let npLyricTrack = null;    // zerado pela ilha Lit (renderNpLyricsLit); motor legado removido
 
 
 // carrega a letra da faixa atual (lê a tag) e prepara o karaokê
@@ -3340,18 +3338,9 @@ function renderNpLyrics() {
 // (MediaTimeController) → no-op (motor de scroll legado removido na Fase F).
 function updateKaraoke() {}
 
-// ---- Janela de 5 linhas com rolagem contínua sincronizada ao timestamp ----
-// A linha atual fica no centro (3ª) com opacidade máxima; as de baixo (que ainda vêm)
-// e as de cima (que já passaram) desbotam conforme a distância. O deslize é feito por
-// transform no wrapper (composição na GPU, sem repaint do texto) animado por uma mola
-// criticamente amortecida integrada no relógio real: a velocidade cresce e decai de
-// forma contínua (sem "arranco" no início), e não cai junto com a taxa de quadros.
-let npLyricScrollRAF = null;
-let npLyricCurTop = null;     // posição animada atual (null = recentra sem deslizar)
-let npLyricVel = 0;           // velocidade da mola (px/s)
-let npLyricLastTop = -1;      // última posição aplicada (evita writes quando parado)
-let npLyricLastTs = 0;        // timestamp do último quadro (p/ dt real)
-const NP_LYRIC_SPRING_W = 10; // rigidez (rad/s): acomoda em ~0,45s sem ultrapassar
+// posição animada do scroll legado — só a var sobrevive (zerada por callers compartilhados);
+// a animação real é da ilha Lit.
+let npLyricCurTop = null;
 
 // (des)ativa o rAF da ilha Lit conforme o karaokê fica visível/oculto.
 function syncLyricScroll() {
