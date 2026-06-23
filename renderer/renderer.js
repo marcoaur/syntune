@@ -2003,180 +2003,23 @@ function closeCropper() { closeViewAnimated($('cropModal')); }
 
 $('cropModal').addEventListener('click', (e) => { if (e.target === $('cropModal')) closeCropper(); });
 
-// ====================== Configurações ======================
-const modal = $('settingsModal');
-// Nomes de exibição dos idiomas (fallback: código em maiúsculas)
-const LANG_NAMES = { en: 'English', pt: 'Português', 'pt-br': 'Português (Brasil)', 'pt-pt': 'Português (Portugal)', es: 'Español', fr: 'Français', de: 'Deutsch', it: 'Italiano', ru: 'Русский', ja: '日本語', zh: '中文' };
-let langConfigured = 'auto'; // idioma salvo ('auto' = detectar pelo locale do SO)
-async function populateLanguageSelect() {
-  let info = {};
-  try { info = await window.api.getI18n(); } catch { /* usa padrões */ }
-  const available = Array.isArray(info.available) ? info.available : [];
-  langConfigured = info.configured ? String(info.configured).toLowerCase() : 'auto';
-  const sel = $('language');
-  sel.innerHTML = '';
-  const auto = document.createElement('option');
-  auto.value = 'auto'; auto.textContent = t('settings.languageAuto');
-  sel.appendChild(auto);
-  for (const code of available) {
-    const o = document.createElement('option');
-    o.value = code; o.textContent = LANG_NAMES[code] || code.toUpperCase();
-    sel.appendChild(o);
-  }
-  sel.value = available.includes(langConfigured) ? langConfigured : 'auto';
-}
-
-$('settingsBtn').addEventListener('click', async () => {
-  const cfg = await window.api.getConfig();
-  await populateLanguageSelect();
-  $('apiKey').value = cfg.apiKey || '';
-  $('useAi').checked = cfg.useAi !== false; // padrão: ligado (compat. instalações antigas)
-  $('advancedEdit').checked = cfg.advancedEdit === true; // padrão: desligado
-  // integração CLI: só exibe o switch se o Syntune CLI estiver instalado
-  try {
-    const cli = await window.api.cliDetect();
-    $('cliAiRow').classList.toggle('hidden', !cli.installed);
-    $('useCliAi').checked = cfg.useCliAi === true;
-  } catch { $('cliAiRow').classList.add('hidden'); }
-  $('geniusToken').value = cfg.geniusToken || '';
-  $('lastfmApiKey').value = cfg.lastfmApiKey || '';
-  $('lastfmSecret').value = cfg.lastfmSecret || '';
-  $('lastfmScrobbleEnabled').checked = !!cfg.lastfmScrobbleEnabled;
-  $('lastfmSessionKey').value = cfg.lastfmSessionKey || '';
-  $('lastfmScrobbleFields').classList.toggle('hidden', !cfg.lastfmScrobbleEnabled);
-  $('model').value = cfg.model || 'gemini-2.5-flash';
-  $('downloadFolder').value = cfg.downloadFolder || '';
-  try { $('appVersion').textContent = t('settings.version', { v: await window.api.getVersion() }); } catch {}
-  upgradeSettingsAccordion(); // troca as seções por <syn-setting-section> (no bundle); idempotente
-  modal.classList.remove('hidden', 'closing');
-});
-$('browseFolder').addEventListener('click', async () => {
-  const dir = await window.api.selectFolder();
-  if (dir) $('downloadFolder').value = dir;
-});
-$('clearFolder').addEventListener('click', () => { $('downloadFolder').value = ''; });
-$('cancelSettings').addEventListener('click', () => closeViewAnimated(modal));
-modal.addEventListener('click', (e) => { if (e.target === modal) closeViewAnimated(modal); });
-
-// Accordion das Configurações: 1 seção aberta por vez. Clicar numa seção fecha as
-// demais; clicar na já aberta a recolhe.
-$('settingsAcc').addEventListener('click', (e) => {
-  const head = e.target.closest('.acc-head');
-  if (!head) return; // após o upgrade Lit não há .acc-head → no-op (o componente cuida do toggle)
-  const item = head.parentElement;
-  const wasOpen = item.classList.contains('open');
-  $('settingsAcc').querySelectorAll('.acc-item.open').forEach((el) => el.classList.remove('open'));
-  if (!wasOpen) item.classList.add('open');
-});
-
-// Troca cada .acc-item legado por <syn-setting-section>, MOVENDO o corpo (.acc-body, com os
-// inputs cujos IDs o renderer lê/escreve) p/ dentro do slot. O componente provê header +
-// toggle. Idempotente.
-function upgradeSettingsAccordion() {
-  const acc = $('settingsAcc');
-  if (!acc) return;
-  for (const item of [...acc.querySelectorAll(':scope > .acc-item')]) {
-    const span = item.querySelector('.acc-head span');
-    const body = item.querySelector('.acc-body');
-    if (!body) continue;
-    const sec = document.createElement('syn-setting-section');
-    sec.heading = span ? span.textContent : '';
-    sec.open = item.classList.contains('open');
-    while (body.firstChild) sec.appendChild(body.firstChild); // preserva os inputs (IDs)
-    acc.replaceChild(sec, item);
-  }
-}
-
-// Single-open (espelha o legado): ao abrir uma seção, fecha as demais.
-$('settingsAcc').addEventListener('syn:setting:toggle', (e) => {
-  if (!e.detail || !e.detail.open) return;
-  $('settingsAcc').querySelectorAll('syn-setting-section').forEach((s) => {
-    if (s !== e.target) s.open = false;
-  });
-});
-
-$('lastfmScrobbleEnabled').addEventListener('change', (e) => {
-  $('lastfmScrobbleFields').classList.toggle('hidden', !e.target.checked);
-});
-
-// Switch "Usar IA no Syntune CLI?" — ação imediata (não espera o Salvar).
-// Ligar: modal de confirmação informando que a chave irá p/ a var STUNE_API_KEY.
-// Desligar: remove a var. A var é (re)gravada ao salvar a chave, se o switch estiver ligado.
-$('useCliAi').addEventListener('change', async (e) => {
-  const on = e.target.checked;
-  if (on && !(await askConfirm(t('settings.cliAiConfirm')))) {
-    e.target.checked = false; // usuário recusou → reverte
-    return;
-  }
-  try {
-    const res = await window.api.cliSetAiEnabled(on);
-    if (on) {
-      // a chave já configurada vira a var agora; senão, será gravada ao salvar a chave
-      toast(res.hasKey ? t('settings.cliAiOnWithKey') : t('settings.cliAiOnNoKey'), 'success');
-    } else {
-      toast(t('settings.cliAiOff'), 'success');
-    }
-  } catch {
-    e.target.checked = !on; // falhou → reverte estado visual
-    toast(t('settings.cliAiError'), 'error');
-  }
-});
-
-$('btnAuthLastfm').addEventListener('click', async () => {
-  const apiKey = $('lastfmApiKey').value.trim();
-  const secret = $('lastfmSecret').value.trim();
-  if (!apiKey || !secret) {
-    $('lastfmAuthHint').textContent = t('settings.lastfmAuthMissing');
-    return;
-  }
-  $('lastfmAuthHint').textContent = t('settings.lastfmAuthWaiting');
-  const res = await window.api.lastfmAuthSession({ apiKey, secret });
-  if (res.error) {
-    $('lastfmAuthHint').textContent = t('settings.lastfmAuthError', { msg: res.error });
-  } else {
-    $('lastfmSessionKey').value = res.sessionKey;
-    $('lastfmAuthHint').textContent = t('settings.lastfmAuthLinked', { user: res.username });
-  }
-});
-$('saveSettings').addEventListener('click', async () => {
-  const prevGenius = (await window.api.getConfig()).geniusToken || '';
-  const prevLastfm = (await window.api.getConfig()).lastfmApiKey || '';
-  const geniusToken = $('geniusToken').value.trim();
-  const lastfmApiKey = $('lastfmApiKey').value.trim();
-  await window.api.setConfig({
-    apiKey: $('apiKey').value.trim(),
-    useAi: $('useAi').checked,
-    advancedEdit: $('advancedEdit').checked,
-    geniusToken,
-    lastfmApiKey,
-    lastfmSecret: $('lastfmSecret').value.trim(),
-    lastfmScrobbleEnabled: $('lastfmScrobbleEnabled').checked,
-    lastfmSessionKey: $('lastfmSessionKey').value.trim(),
-    model: $('model').value,
-    downloadFolder: $('downloadFolder').value.trim()
-  });
-  // troca de idioma: aplica reiniciando o app (o relaunch encerra a execução aqui)
-  const langSel = $('language').value;
-  if (langSel !== langConfigured) {
-    await window.api.setLanguage(langSel === 'auto' ? '' : langSel);
-    return;
-  }
-  advancedEdit = $('advancedEdit').checked; // reflete na sessão imediatamente
+// ====================== Configurações (ilha syn-settings) ======================
+// A view <syn-settings> (= #settingsModal, tag-swap) é dona do form + load/save/toggles/auth.
+// Aqui só: injetar t/toast/closeView, abrir pelo botão da topbar, e reagir ao save (efeitos
+// cross-subsistema: advancedEdit + caches + reload + karaokê).
+const synSettings = document.querySelector('syn-settings');
+if (synSettings) { synSettings.t = t; synSettings.toast = toast; synSettings.closeView = (el) => closeViewAnimated(el); }
+$('settingsBtn').addEventListener('click', () => { if (synSettings) synSettings.open(); });
+document.addEventListener('syn:settings:saved', (e) => {
+  const d = e.detail || {};
+  advancedEdit = d.advancedEdit;
   if (npOpen()) {
     if ($('nowPlaying').classList.contains('lyrics-mode')) renderNpLyrics(); // aplica/remove gutters
     updateChordsBtn();
   }
-  closeViewAnimated(modal);
-  toast(t('settings.saved'), 'success');
-  // se o token do Genius mudou, limpa o cache em memória p/ buscar fotos novamente
-  if (geniusToken !== prevGenius) {
-    for (const k of Object.keys(artistImgCache)) delete artistImgCache[k];
-  }
-  // se a chave do Last.fm mudou, limpa o cache de reproduções globais
-  if (lastfmApiKey !== prevLastfm) {
-    for (const k of Object.keys(globalPlaycountCache)) delete globalPlaycountCache[k];
-  }
-  await reloadLibrary(); // a pasta pode ter mudado
+  if (d.geniusChanged) { for (const k of Object.keys(artistImgCache)) delete artistImgCache[k]; }
+  if (d.lastfmChanged) { for (const k of Object.keys(globalPlaycountCache)) delete globalPlaycountCache[k]; }
+  reloadLibrary(); // a pasta pode ter mudado
 });
 
 // ====================== Player ======================
