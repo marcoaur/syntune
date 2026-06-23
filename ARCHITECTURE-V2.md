@@ -94,17 +94,26 @@ O orquestrador mínimo é um COMPONENTE, não um script.
 
 ## Ordem de execução (capacidade-first, risco crescente)
 
-| Fase | O quê | Risco |
-|---|---|---|
-| 0 | infra de capacidades (`capabilities.js`) + app-root como host estável | baixo |
-| 1 | capacidades: loading, confirm, menu, palette | baixo, drena geral |
-| 2 | `syn-ipc` bridge + mover `window.api.*` | médio |
-| 3 | engines: scrobbler, downloader, device-watcher | médio |
-| 4 | `syn-audio` (grafo Web Audio + EQ) | ⚠️ alto |
-| 5 | views frias→quentes: settings → add → playlists → library/artist → devices → track-editor | médio |
-| 6 | `syn-now-playing` (núcleo/hot-path) | ⚠️ alto, por último |
-| 7 | main Ciclo 6 (IPC modules) — paralelo | baixo-médio |
-| 8 | renderer.js → entry trivial + limpar markup legado | baixo |
+| Fase | O quê | Risco | Estado |
+|---|---|---|---|
+| 0 | infra de capacidades (`capabilities.js`) | baixo | ☑ |
+| 1 | capacidades: loading, palette, confirm, menu | baixo, drena geral | ☑ |
+| ~~2~~ | ~~`syn-ipc` bridge isolado~~ — **CANCELADA (cerimônia)** | — | dropada |
+| 2′ | engines (cada dona do próprio IPC+eventos): downloader · device-watcher · scrobbler | médio-alto (acopladas) | — |
+| 3 | `syn-audio` (grafo Web Audio + EQ) | ⚠️ alto | — |
+| 4 | views frias→quentes: settings → add → playlists → library/artist → devices → track-editor | médio | — |
+| 5 | `syn-now-playing` (núcleo/hot-path) | ⚠️ alto, por último | — |
+| 6 | event-bus + store-mínimo + app-root shell (quando a coordenação cross-component aparecer) | médio | — |
+| 7 | main Ciclo 6 (IPC modules) — paralelo | baixo-médio | — |
+| 8 | renderer.js → entry trivial + limpar markup legado | baixo | — |
+
+**Crítica (revisão pós-Fase 1):** a Fase 2 original (`syn-ipc` bridge + mover 79 `window.api.*`)
+é CERIMÔNIA prematura — `window.api` já é o bridge (preload), e sem consumidores (engines/
+views) nada drena. **Princípio corrigido:** cada engine/view assina os SEUS eventos
+(`onYoutubeProgress`…) e chama o SEU IPC direto (`window.api` ou `api` injetado). O `syn-ipc`
+bridge genérico + o event-bus + o store-mínimo só emergem na Fase 6, quando a coordenação
+cross-component justificar — não antes. Engines/views são o trabalho real de drain (cada uma
+~200-300 ln acopladas a render da lista / hot-path → sessão dedicada + gate).
 
 Cada fase: 1 commit + gate (`ELECTRON_ENABLE_LOGGING` + validação do usuário).
 
