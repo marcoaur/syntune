@@ -714,29 +714,16 @@ function closePlaylistsView() { closeViewAnimated($('playlistsView')); }
 let _plIntentsWired = false;
 function renderPlaylistsGrid() {
   const grid = $('plGrid');
-  const useLit = customElements.get('syn-playlist-card');
-  if (useLit && !_plIntentsWired) { // delegação: card Lit sobe syn:playlist:open
+  if (!_plIntentsWired) { // delegação: card Lit <syn-playlist-card> sobe syn:playlist:open
     grid.addEventListener('syn:playlist:open', (e) => openPlaylistPage(e.detail.id));
     _plIntentsWired = true;
   }
   grid.innerHTML = '';
   for (const p of playlists) {
     const ps = playlistSongs(p);
-    if (useLit) {
-      const c = document.createElement('syn-playlist-card');
-      c.pid = p.id; c.name = p.name; c.sub = tn('count.track', p.tracks.length); c.coverHtml = playlistCoverHtml(ps);
-      grid.appendChild(c);
-      continue;
-    }
-    const card = document.createElement('div');
-    card.className = 'pl-card';
-    const cover = document.createElement('div'); cover.className = 'pl-cover'; cover.innerHTML = playlistCoverHtml(ps);
-    const name = document.createElement('div'); name.className = 'pl-card-name'; name.textContent = p.name;
-    const sub = document.createElement('div'); sub.className = 'pl-card-sub';
-    sub.textContent = tn('count.track', p.tracks.length);
-    card.append(cover, name, sub);
-    card.addEventListener('click', () => openPlaylistPage(p.id));
-    grid.appendChild(card);
+    const c = document.createElement('syn-playlist-card');
+    c.pid = p.id; c.name = p.name; c.sub = tn('count.track', p.tracks.length); c.coverHtml = playlistCoverHtml(ps);
+    grid.appendChild(c);
   }
   // card "Nova playlist"
   const add = document.createElement('div');
@@ -791,21 +778,10 @@ function buildPlaylistRow(s, pSongs, index, id) {
   card.classList.add('pp-row');
   card.draggable = true;
 
-  if (card.tagName === 'SYN-SONG-CARD') {
-    // ilha Lit: handle + remover vêm no TEMPLATE (modo row) — não injetar no light-DOM
-    // (o card re-renderiza ao carregar a capa e apagaria nós injetados).
-    card.vm = { ...card.vm, row: true };
-    card.addEventListener('syn:song:remove', () => removeFromPlaylist(id, s.filePath));
-  } else {
-    // legado (electron . sem bundler): injeta direto (DOM estável)
-    const handle = document.createElement('span');
-    handle.className = 'pl-drag'; handle.innerHTML = ICONS.grip;
-    card.insertBefore(handle, card.firstChild);
-    const rm = document.createElement('button');
-    rm.className = 'pl-remove'; rm.title = t('playlists.removeTrack'); rm.innerHTML = ICONS.close;
-    rm.addEventListener('click', (e) => { e.stopPropagation(); removeFromPlaylist(id, s.filePath); });
-    card.appendChild(rm);
-  }
+  // ilha Lit: handle + remover vêm no TEMPLATE (modo row) — não injetar no light-DOM
+  // (o card re-renderiza ao carregar a capa e apagaria nós injetados).
+  card.vm = { ...card.vm, row: true };
+  card.addEventListener('syn:song:remove', () => removeFromPlaylist(id, s.filePath));
 
   card.addEventListener('dragstart', () => { plDragFrom = index; card.classList.add('dragging'); });
   card.addEventListener('dragend', () => {
@@ -942,114 +918,9 @@ function buildSongCardLit(s, queueList) {
   return el;
 }
 
+// Card de faixa = ilha Lit <syn-song-card> (dirigida por VM; capa/badges/intents internos).
 function buildSongCard(s, queueList) {
-  if (customElements.get('syn-song-card')) return buildSongCardLit(s, queueList);
-  const card = document.createElement('div');
-  card.className = 'song-card' + (s.deviceOnly ? ' device-only' : '');
-  card.dataset.path = s.filePath;
-
-  const thumb = document.createElement('div');
-  thumb.className = 'song-thumb';
-  const known = coverState.get(s.filePath);
-  if (known === false) {
-    thumb.innerHTML = '<span class="ph">♪</span>';
-  } else {
-    // capa desconhecida: skeleton até o onload; conhecida: cache nativo resolve na hora
-    if (known === undefined) thumb.innerHTML = '<span class="cover-skel"></span>';
-    const img = document.createElement('img');
-    img.alt = '';
-    img.loading = 'lazy';     // o Chromium só busca quando perto da viewport
-    img.decoding = 'async';
-    const src = coverUrl(s);
-    img.onload = () => {
-      coverState.set(s.filePath, true);
-      thumb.querySelector('.cover-skel')?.remove();
-      applyPalette(card, src);
-    };
-    img.onerror = () => {
-      coverState.set(s.filePath, false);
-      img.remove();
-      thumb.querySelector('.cover-skel')?.remove();
-      if (!thumb.querySelector('.ph')) {
-        const ph = document.createElement('span');
-        ph.className = 'ph'; ph.textContent = '♪';
-        thumb.insertBefore(ph, thumb.firstChild);
-      }
-    };
-    img.src = src;
-    thumb.appendChild(img);
-  }
-  // overlay de play/pause sobre a capa (aparece no hover)
-  const overlay = document.createElement('div');
-  overlay.className = 'thumb-overlay';
-  overlay.innerHTML = `<span class="ov-play">${ICONS.play}</span><span class="ov-pause">${ICONS.pause}</span>`;
-  thumb.appendChild(overlay);
-
-  const info = document.createElement('div');
-  info.className = 'song-info';
-  const titleRow = document.createElement('div');
-  titleRow.className = 'song-title-row';
-  const eq = document.createElement('span');
-  eq.className = 'now-eq';
-  eq.innerHTML = '<i></i><i></i><i></i>';
-  const title = document.createElement('div');
-  title.className = 'song-title';
-  title.textContent = s.title || s.fileName.replace(/\.mp3$/i, '');
-  titleRow.append(eq, title);
-  const sub = document.createElement('div');
-  sub.className = 'song-sub';
-  sub.textContent = songSubtitle(s);
-  info.append(titleRow, sub);
-
-  // badges de status de sincronização
-  const badges = document.createElement('div');
-  badges.className = 'song-badges';
-  if (s.deviceOnly) {
-    const b = document.createElement('span');
-    b.className = 'device-only-badge';
-    b.textContent = t('badges.onDevice');
-    b.title = t('badges.onDeviceTitle');
-    badges.appendChild(b);
-  } else if (hasSyncContext) {
-    const synced = syncedKeys.has(keyOf(s));
-    const title = synced ? t('badges.syncedTitle') : t('badges.notSyncedTitle');
-    let b;
-    if (customElements.get('syn-sync-badge')) {
-      // ilha Lit (bundle): folha syn-sync-badge — props down (status/label)
-      b = document.createElement('syn-sync-badge');
-      b.status = synced ? 'synced' : 'unsynced';
-      b.label = title;
-    } else {
-      // fallback legado (electron . sem bundler): span equivalente
-      b = document.createElement('span');
-      b.className = 'sync-badge ' + (synced ? 'synced' : 'unsynced');
-      b.textContent = synced ? '✓' : '○';
-      b.title = title;
-    }
-    badges.appendChild(b);
-  }
-
-  const menu = document.createElement('button');
-  menu.className = 'song-menu';
-  menu.textContent = '⋯';
-  menu.title = t('common.edit');
-  menu.addEventListener('click', (e) => { e.stopPropagation(); openSongMenu(s, menu); });
-
-  card.append(thumb, info, badges, menu);
-  // clicar no corpo do card toca a faixa; se já for a faixa atual, alterna play/pause
-  card.addEventListener('click', () => {
-    if (current && current.filePath === s.filePath) togglePlay();
-    else {
-      spawnPlayBurst(card); // onda de cor a partir do card
-      playFromCard(s, queueList);
-      if (isDemoTrack(s)) revealDemoImmersive(); // demo: vai direto pro modo imersivo
-    }
-  });
-  if (current && current.filePath === s.filePath) {
-    card.classList.add('playing');
-    if (!isPlaying) card.classList.add('paused');
-  }
-  return card;
+  return buildSongCardLit(s, queueList);
 }
 
 function buildPendingCard(job) {
@@ -3993,7 +3864,7 @@ $('npEqBtn').addEventListener('click', () => {
   if (show) {
     p.classList.remove('hidden', 'closing');
     p.classList.add('np-mode');
-    if (customElements.get('syn-eq')) { ensureLitEq(); syncLitEq(); } else renderEqBands();
+    ensureLitEq(); syncLitEq();
     renderEqPresetOptions();
   }
 });
@@ -5008,41 +4879,11 @@ function persistEqState() {
   }, 300);
 }
 
-function renderEqBands() {
-  const box = $('eqBands');
-  box.innerHTML = '';
-  EQ_BANDS.forEach((b, i) => {
-    const col = document.createElement('div');
-    col.className = 'eq-band';
-    const val = document.createElement('div');
-    val.className = 'eq-val';
-    val.textContent = fmtDb(eqGains[i]);
-    const slider = document.createElement('input');
-    slider.type = 'range';
-    slider.className = 'eq-slider';
-    slider.min = '-12'; slider.max = '12'; slider.step = '1';
-    slider.value = String(eqGains[i]);
-    slider.addEventListener('input', () => {
-      eqGains[i] = parseInt(slider.value, 10) || 0;
-      val.textContent = fmtDb(eqGains[i]);
-      if (!eqEnabled) { eqEnabled = true; $('eqEnabled').checked = true; }
-      applyEq();
-      updateEqBtn();
-    });
-    slider.addEventListener('change', persistEqState);
-    const freq = document.createElement('div');
-    freq.className = 'eq-freq';
-    freq.textContent = b.label;
-    col.append(val, slider, freq);
-    box.appendChild(col);
-  });
-}
-
 // Ilha Lit do EQ: <syn-eq> (bandas + toggle + zerar) substitui #eqBands/#eqEnabled/#eqFlat.
 // Os presets/save seguem legados (o componente não os cobre). Eventos fiam no estado/Web
-// Audio existente (eqGains/applyEq/persistEqState). Guardado: sob `electron .` → bandas legadas.
+// Audio existente (eqGains/applyEq/persistEqState).
 function ensureLitEq() {
-  if (_litEq || !customElements.get('syn-eq')) return;
+  if (_litEq) return;
   const box = $('eqBands');
   if (!box) return;
   box.innerHTML = '';
@@ -5090,7 +4931,7 @@ function loadEqPreset(gains, enable) {
   while (eqGains.length < 6) eqGains.push(0);
   if (enable) { eqEnabled = true; $('eqEnabled').checked = true; }
   applyEq();
-  if (_litEq) syncLitEq(); else renderEqBands();
+  syncLitEq();
   persistEqState();
 }
 
@@ -5101,7 +4942,7 @@ function toggleEqPanel() {
   p.classList.toggle('hidden');
   if (!p.classList.contains('hidden')) {
     $('queuePanel').classList.add('hidden');
-    if (customElements.get('syn-eq')) { ensureLitEq(); syncLitEq(); } else renderEqBands();
+    ensureLitEq(); syncLitEq();
     renderEqPresetOptions();
   }
 }
@@ -5421,31 +5262,6 @@ async function persistScope(serial, scope) {
   });
 }
 
-// chips de artistas (toque para incluir/excluir do escopo de sincronização)
-function renderScopeArtists(box, scope, serial) {
-  box.innerHTML = '';
-  const arts = libraryArtists();
-  if (!arts.length) {
-    box.innerHTML = `<div class="scope-empty">${t('devices.noArtists')}</div>`;
-    return;
-  }
-  const sel = new Set(scope.artists.map((a) => normPart(a)));
-  for (const [key, disp] of arts) {
-    const chip = document.createElement('button');
-    chip.type = 'button';
-    chip.className = 'chip' + (sel.has(key) ? ' on' : '');
-    chip.textContent = disp;
-    chip.addEventListener('click', async () => {
-      if (sel.has(key)) { sel.delete(key); chip.classList.remove('on'); }
-      else { sel.add(key); chip.classList.add('on'); }
-      scope.artists = [...sel];
-      await persistScope(serial, scope);
-      refreshDeviceStats(serial);
-    });
-    box.appendChild(chip);
-  }
-}
-
 // ---- Notificação de dispositivo conectado ----
 function showDeviceNotice(info) {
   lastAttachedSerial = info.serial;
@@ -5579,184 +5395,9 @@ $('toggleIgnored').addEventListener('click', () => {
   $('ignoredList').classList.toggle('hidden', !showingIgnored);
 });
 
-function buildSwitch(checked, onChange) {
-  const label = document.createElement('label');
-  label.className = 'switch';
-  const input = document.createElement('input');
-  input.type = 'checkbox';
-  input.checked = !!checked;
-  const track = document.createElement('span');
-  track.className = 'track';
-  input.addEventListener('change', () => onChange(input.checked));
-  label.append(input, track);
-  return label;
-}
-
-function buildDeviceRow(d) {
-  const row = document.createElement('div');
-  row.className = 'device-row' + (d.connected ? ' connected' : '');
-  row.dataset.serial = d.serial;
-  deviceConnInfo[d.serial] = { free: d.free, size: d.size, connected: d.connected };
-
-  // ---- cabeçalho: ícone com status + identidade + toggle de sync ----
-  const head = document.createElement('div');
-  head.className = 'dv-card-head';
-
-  const icon = document.createElement('div');
-  icon.className = 'dv-icon';
-  icon.title = d.connected ? t('devices.connected') : t('devices.disconnected');
-  icon.innerHTML =
-    '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
-    '<line x1="22" y1="12" x2="2" y2="12"/>' +
-    '<path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>' +
-    '<line x1="6" y1="16" x2="6.01" y2="16"/><line x1="10" y1="16" x2="10.01" y2="16"/></svg>' +
-    '<i class="dv-dot"></i>';
-
-  const id = document.createElement('div');
-  id.className = 'dv-id';
-  const nick = document.createElement('input');
-  nick.type = 'text';
-  nick.className = 'dv-nick';
-  nick.placeholder = t('devices.nickPlaceholder');
-  nick.value = d.nickname || '';
-  nick.title = t('devices.nickTitle');
-  nick.addEventListener('change', async () => {
-    await window.api.devicesUpdate({ serial: d.serial, nickname: nick.value });
-  });
-  nick.addEventListener('keydown', (e) => { if (e.key === 'Enter') nick.blur(); });
-  const meta = document.createElement('div');
-  meta.className = 'dv-meta';
-  const parts = [];
-  if (d.connected && d.drive) parts.push(t('devices.drive', { d: d.drive }));
-  if (d.label) parts.push(d.label);
-  parts.push(d.connected ? t('devices.connectedLower') : t('devices.disconnectedLower'));
-  meta.textContent = parts.join(' · ');
-  if (d.usedVolumeFallback) {
-    const w = document.createElement('span');
-    w.className = 'warn';
-    w.textContent = ' ⚠';
-    w.title = t('devices.volumeWarn');
-    meta.appendChild(w);
-  }
-  id.append(nick, meta);
-
-  const syncBox = document.createElement('div');
-  syncBox.className = 'dv-sync';
-  syncBox.title = t('devices.syncTitle');
-  syncBox.append(buildSwitch(d.syncEnabled, async (val) => {
-    await window.api.devicesUpdate({ serial: d.serial, syncEnabled: val });
-    await renderDevices(); // mostra/oculta escopo, capacidade e ações
-    if (val && d.connected) {
-      runScanAndSync({ serial: d.serial, nickname: nick.value || d.nickname, label: d.label,
-        configured: true, syncEnabled: true });
-    } else if (!val && activeDevice && activeDevice.serial === d.serial) {
-      activeDevice = null; deviceOnlySongs = []; renderList();
-    }
-  }));
-  const syncTag = document.createElement('small');
-  syncTag.textContent = t('devices.syncLabel');
-  syncBox.appendChild(syncTag);
-
-  head.append(icon, id, syncBox);
-  row.appendChild(head);
-
-  // ---- capacidade (só com o dispositivo conectado) ----
-  if (d.connected) {
-    const cap = document.createElement('div');
-    cap.className = 'device-capacity';
-    paintCapacity(cap, { free: d.free, size: d.size }, deviceStats[d.serial]);
-    row.appendChild(cap);
-  }
-
-  // ---- escopo: segmentado Tudo | Artistas + chips ----
-  if (d.syncEnabled) {
-    const scope = (d.syncScope && d.syncScope.mode === 'artists')
-      ? { mode: 'artists', artists: (d.syncScope.artists || []).slice() }
-      : { mode: 'all' };
-
-    const scopeRow = document.createElement('div');
-    scopeRow.className = 'dv-scope';
-    const scopeLbl = document.createElement('span');
-    scopeLbl.className = 'dv-scope-lbl';
-    scopeLbl.textContent = t('devices.whatToTake');
-    const seg = document.createElement('div');
-    seg.className = 'seg';
-    const optAll = document.createElement('button');
-    optAll.type = 'button'; optAll.className = 'seg-opt'; optAll.textContent = t('devices.all');
-    const optArt = document.createElement('button');
-    optArt.type = 'button'; optArt.className = 'seg-opt'; optArt.textContent = t('devices.artists');
-    seg.append(optAll, optArt);
-    scopeRow.append(scopeLbl, seg);
-
-    const artistsBox = document.createElement('div');
-    artistsBox.className = 'scope-artists';
-
-    const applyMode = () => {
-      optAll.classList.toggle('active', scope.mode === 'all');
-      optArt.classList.toggle('active', scope.mode === 'artists');
-      artistsBox.classList.toggle('hidden', scope.mode !== 'artists');
-      if (scope.mode === 'artists') renderScopeArtists(artistsBox, scope, d.serial);
-    };
-    applyMode();
-
-    const setMode = async (mode) => {
-      if (scope.mode === mode) return;
-      if (mode === 'artists' && !scope.artists.length) {
-        scope.artists = libraryArtists().map(([k]) => k); // começa com todos
-      }
-      scope.mode = mode;
-      applyMode();
-      await persistScope(d.serial, scope);
-      refreshDeviceStats(d.serial);
-    };
-    optAll.addEventListener('click', () => setMode('all'));
-    optArt.addEventListener('click', () => setMode('artists'));
-
-    row.append(scopeRow, artistsBox);
-  }
-
-  // ---- progresso inline (mostrado durante a sincronização) ----
-  const prog = document.createElement('div');
-  prog.className = 'device-progress hidden';
-  prog.innerHTML = '<div class="dp-bar"><div></div></div><div class="dp-text"></div>';
-  row.appendChild(prog);
-
-  // ---- rodapé: ignorar (discreto) + sincronizar agora (ação primária) ----
-  const foot = document.createElement('div');
-  foot.className = 'dv-foot';
-  const ignoreBtn = document.createElement('button');
-  ignoreBtn.type = 'button';
-  ignoreBtn.className = 'dv-ignore';
-  ignoreBtn.textContent = d.ignored ? t('devices.restore') : t('devices.ignore');
-  ignoreBtn.addEventListener('click', async () => {
-    await window.api.devicesUpdate({ serial: d.serial, ignored: !d.ignored });
-    await renderDevices();
-  });
-  foot.appendChild(ignoreBtn);
-
-  if (d.syncEnabled && d.connected) {
-    const syncNow = document.createElement('button');
-    syncNow.type = 'button';
-    syncNow.className = 'dv-sync-now';
-    syncNow.innerHTML =
-      '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
-      '<path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/></svg>' +
-      `<span>${t('devices.syncNow')}</span>`;
-    syncNow.addEventListener('click', () => runScanAndSync({
-      serial: d.serial, nickname: nick.value || d.nickname, label: d.label,
-      configured: true, syncEnabled: true
-    }));
-    foot.appendChild(syncNow);
-  }
-  row.appendChild(foot);
-
-  return row;
-}
-
-// Builder guardado: <syn-device> (Lit, light-DOM) no bundle; buildDeviceRow legado sob `electron .`.
-// O host vira .device-row[data-serial] → CSS global + helpers por-serial (capacidade/progresso) seguem.
+// Linha de dispositivo = ilha Lit <syn-device> (light-DOM). O host vira .device-row[data-serial]
+// → CSS global + helpers por-serial (capacidade/progresso) seguem valendo.
 function buildDeviceEl(d) {
-  if (!customElements.get('syn-device')) return buildDeviceRow(d);
   deviceConnInfo[d.serial] = { free: d.free, size: d.size, connected: d.connected };
   const el = document.createElement('syn-device');
   el.device = d;
