@@ -3376,92 +3376,13 @@ $('npChordsBtn').addEventListener('click', () => {
 });
 
 // ============== Edição inline de acordes no karaokê (modo edição avançada) ==============
-function chordEditActive() {
-  return advancedEdit && npShowChords && $('nowPlaying').classList.contains('lyrics-mode');
-}
 function markChordsDirty() { if (!npChordsDirty) { npChordsDirty = true; updateChordsBtn(); } }
-function selectChord(el) {
-  if (npSelChordEl === el) return;
-  if (npSelChordEl) npSelChordEl.classList.remove('sel');
-  npSelChordEl = el || null;
-  if (npSelChordEl) npSelChordEl.classList.add('sel');
-}
 function msStamp(tSec) {
   const s = Math.max(0, tSec);
   const mm = String(Math.floor(s / 60)).padStart(2, '0');
   const ss = String(Math.floor(s % 60)).padStart(2, '0');
   const ms = String(Math.round((s - Math.floor(s)) * 1000)).padStart(3, '0');
   return `${mm}:${ss}.${ms}`;
-}
-// tempo (s) a partir da posição X do ponteiro dentro do trilho útil (com inset) da row
-function timeFromX(anchor, rowEl, clientX) {
-  const r = rowEl.getBoundingClientRect();
-  const usable = Math.max(1, r.width - 2 * CHORD_INSET);
-  const f = Math.min(1, Math.max(0, (clientX - r.left - CHORD_INSET) / usable));
-  return anchor.start + f * (anchor.end - anchor.start);
-}
-function repositionChord(el) {
-  const a = el._anchor; if (!a) return;
-  const f = Math.min(1, Math.max(0, (el._src.t - a.start) / Math.max(0.1, a.end - a.start)));
-  el.style.left = chordSpanFromFraction(f);
-}
-function findChordEl(srcObj) {
-  for (const a of npLyricAnchors) if (a.chords) for (const c of a.chords) if (c.src === srcObj) return c.el;
-  return null;
-}
-function showChordHint(el, tSec) {
-  let h = $('npChordHint');
-  if (!h) { h = document.createElement('div'); h.id = 'npChordHint'; h.className = 'np-chord-hint'; document.body.appendChild(h); }
-  h.textContent = msStamp(tSec);
-  h.classList.remove('hidden');
-  const r = el.getBoundingClientRect();
-  h.style.left = (r.left + r.width / 2) + 'px';
-  h.style.top = (r.top - 6) + 'px';
-}
-function hideChordHint() { const h = $('npChordHint'); if (h) h.classList.add('hidden'); }
-
-function editChordText(el, isNew) {
-  if (!el || el.querySelector('input')) return;
-  selectChord(el);
-  const src = el._src;
-  const inp = document.createElement('input');
-  inp.type = 'text'; inp.className = 'np-chord-input'; inp.value = src.text || '';
-  el.textContent = ''; el.appendChild(inp);
-  inp.focus(); inp.select();
-  let done = false;
-  const commit = (keep) => {
-    if (done) return; done = true;
-    const v = inp.value.trim();
-    if (keep && v) {
-      if (v !== src.text) { src.text = v; markChordsDirty(); }
-      el.textContent = v;
-    } else if (isNew) {
-      // criação cancelada ou nome vazio → remove o acorde recém-criado
-      const idx = npChordsLines.indexOf(src);
-      if (idx >= 0) npChordsLines.splice(idx, 1);
-      renderNpLyrics();
-    } else {
-      el.textContent = src.text || '?';
-    }
-  };
-  inp.addEventListener('keydown', (ev) => {
-    ev.stopPropagation();
-    if (ev.key === 'Enter') { ev.preventDefault(); commit(true); }
-    else if (ev.key === 'Escape') { ev.preventDefault(); commit(false); }
-  });
-  inp.addEventListener('blur', () => commit(true));
-}
-
-function createChordInRow(rowEl, clientX) {
-  const a = rowEl._anchor; if (!a) return;
-  let t = timeFromX(a, rowEl, clientX);
-  t = Math.min(a.end - 0.001, Math.max(a.start, t));
-  const obj = { t: Math.round(t * 1000) / 1000, text: 'C' };
-  npChordsLines.push(obj);
-  markChordsDirty();
-  renderNpLyrics();
-  const el = findChordEl(obj);
-  if (el) editChordText(el, true); // abre a edição do nome; cancelar remove o acorde novo
 }
 
 async function saveChordsInline() {
@@ -3486,89 +3407,6 @@ async function saveChordsInline() {
   toast(t('editor.saved'), 'success');
 }
 
-// --- camada de gestos (arrastar / criar / editar / apagar) ---
-(function initChordEdit() {
-  const box = $('npLyrics');
-  if (!box) return;
-  let drag = null;
-
-  box.addEventListener('mousedown', (e) => {
-    if (!chordEditActive()) return;
-    const el = e.target.closest('.np-chord');
-    if (!el || el.querySelector('input')) return;
-    const a = el._anchor, row = el.parentElement;
-    if (!a || !row) return;
-    drag = { el, anchor: a, row, wasPlaying: !audio.paused, moved: false, startX: e.clientX };
-  });
-  document.addEventListener('mousemove', (e) => {
-    if (!drag) return;
-    if (!drag.moved) {
-      if (Math.abs(e.clientX - drag.startX) < 4) return;
-      drag.moved = true;
-      if (drag.wasPlaying) audio.pause();   // auto-pause ao começar a arrastar
-      drag.el.classList.add('dragging');
-      selectChord(drag.el);
-    }
-    let t = timeFromX(drag.anchor, drag.row, e.clientX);
-    t = Math.min(drag.anchor.end - 0.001, Math.max(drag.anchor.start, t)); // dentro do intervalo
-    drag.el._src.t = Math.round(t * 1000) / 1000;
-    repositionChord(drag.el);
-    showChordHint(drag.el, drag.el._src.t);
-    markChordsDirty();
-    e.preventDefault();
-  });
-  const endDrag = () => {
-    if (!drag) return;
-    const d = drag; drag = null;
-    hideChordHint();
-    d.el.classList.remove('dragging');
-    if (d.moved && d.wasPlaying) audio.play().catch(() => {});
-  };
-  document.addEventListener('mouseup', endDrag);
-
-  box.addEventListener('dblclick', (e) => {
-    if (!chordEditActive()) return;
-    const chordEl = e.target.closest('.np-chord');
-    if (chordEl) { editChordText(chordEl); return; }
-    const row = e.target.closest('.np-chord-row');
-    if (row) createChordInRow(row, e.clientX);
-  });
-
-  // clicar fora de um acorde desseleciona (libera ←/→ para a navegação normal)
-  box.addEventListener('click', (e) => {
-    if (!chordEditActive()) return;
-    if (e.target.closest('.np-chord')) return; // clique no acorde já trata seleção
-    selectChord(null);
-  });
-
-  document.addEventListener('keydown', (e) => {
-    if (!chordEditActive()) return;
-    const ae = document.activeElement;
-    if (ae && ae.classList && ae.classList.contains('np-chord-input')) return; // editando texto
-    if (!npSelChordEl) return;
-    // Esc desseleciona (sem fechar o karaokê); precisa parar os OUTROS keydown do document
-    if (e.key === 'Escape') { e.preventDefault(); e.stopImmediatePropagation(); selectChord(null); return; }
-    const src = npSelChordEl._src, a = npSelChordEl._anchor;
-    if (e.key === 'Delete' || e.key === 'Backspace') {
-      e.preventDefault(); e.stopImmediatePropagation();
-      const idx = npChordsLines.indexOf(src);
-      if (idx >= 0) npChordsLines.splice(idx, 1);
-      npSelChordEl = null; markChordsDirty(); renderNpLyrics();
-    } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
-      // stopImmediatePropagation: sem isso o keydown global (←/→ = faixa anterior/próxima)
-      // também dispararia, trocando de música ao ajustar o acorde.
-      e.preventDefault(); e.stopImmediatePropagation();
-      const step = e.shiftKey ? 0.1 : (e.altKey ? 0.001 : 0.01); // Shift=100ms · Alt=1ms · padrão=10ms
-      let t = src.t + (e.key === 'ArrowRight' ? step : -step);
-      if (a) t = Math.min(a.end - 0.001, Math.max(a.start, t));
-      src.t = Math.round(t * 1000) / 1000;
-      repositionChord(npSelChordEl);
-      showChordHint(npSelChordEl, src.t);
-      clearTimeout(npChordHintTimer); npChordHintTimer = setTimeout(hideChordHint, 900);
-      markChordsDirty();
-    }
-  });
-})();
 
 // ---- Fila (painel) ----
 function toggleQueuePanel() {
