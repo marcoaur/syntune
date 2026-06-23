@@ -25,6 +25,7 @@ export { SynQueueItem } from './queue/syn-queue-item.js';
 export { SynMiniPlayer } from './player/syn-mini-player.js';
 export { SynVisualizer } from './visualizer/syn-visualizer.js';
 export { SynLyrics } from './lyrics/syn-lyrics.js';
+export { SynLyricsEditor } from './lyrics/syn-lyrics-editor.js';
 
 export {
   apiContext, playerContext, libraryContext, paletteContext,

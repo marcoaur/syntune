@@ -248,7 +248,7 @@ extraídos do que já funcionou. Mudar arquétipo depois = caro; por isso só as
 | Karaokê (letra) | `syn-lyrics` | scroll por transform (mola), MediaTimeController | ☑ componente+teste+fiado+**gate de app OK** (usuário testou à exaustão, sem bugs); swap guardado (Lit no bundle, legado sob `electron .`/edição inline) |
 | Chords overlay | `syn-chord-line` (em ctx) | barra/glow imperativos; já provado no piloto | ☑ reusado por `syn-lyrics` (1 por verso, janela `[verso.t, próximo.t]`); ganhou `.active` (gate da varredura) + `.player` (facade fora do app-root) |
 | Editor inline de acorde | editor em `syn-lyrics` sobre `syn-chord-line` | gestos (drag/setas/criar/apagar/renomear), dirty/save | ◐ componente+teste+fiado (`editMode`; muta `npChordsLines` compartilhado → save legado o lê; keydown em captura vence o ←/→ global); **gate de app pendente** |
-| Editor de letra (tap-time) | `syn-lyrics-editor` | reusa mecânica do inline | ☐ |
+| Editor de letra (tap-time) | `syn-lyrics-editor` | reusa mecânica do inline | ◐ componente+teste+fiado (light-DOM, modal próprio no body; shell Lit 1×, rows imperativas = foco/undo fiéis; importa `modules/lrc.js`; emite save/close → renderer persiste); **gate de app pendente** |
 | Editor de detalhes (tags) | `syn-track-editor` | form + IA enrich + cropper | ☐ |
 
 ### Fase F — Limpeza — Status: ☐

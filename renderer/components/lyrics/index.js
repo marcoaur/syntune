@@ -2,4 +2,6 @@
 // <syn-chord-line> que ele compõe) e reexporta a classe p/ teste.
 import '../chord/syn-chord-line.js';
 import './syn-lyrics.js';
+import './syn-lyrics-editor.js';
 export { SynLyrics } from './syn-lyrics.js';
+export { SynLyricsEditor } from './syn-lyrics-editor.js';

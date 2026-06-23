@@ -2035,8 +2035,63 @@ function leSwitchMode() {
   renderAllLines();
 }
 
+// ---- Editor de letra via ilha Lit (<syn-lyrics-editor>) ----
+// COEXISTE com o editor legado abaixo. Usa a ilha quando registrada (bundle); sob `electron .`
+// (sem bundler) o custom element não existe → cai no legado. A ilha é um modal próprio
+// (montado no body, fora do app-root → recebe o player por propriedade); o renderer só lhe
+// entrega os dados na abertura e PERSISTE no save (grava tags + status + reload).
+let _litLyricsEditor = null;
+let _leLitPlayerWasHidden = false;
+function useLitLyricsEditor() { return !!customElements.get('syn-lyrics-editor'); }
+function ensureLitLyricsEditor() {
+  if (_litLyricsEditor) return _litLyricsEditor;
+  const el = document.createElement('syn-lyrics-editor');
+  el.classList.add('hidden');
+  el.t = t; el.player = _litPlayer;
+  el.addEventListener('syn:lyrics-editor:save', (e) => onLitLyricsEditorSave(e.detail));
+  el.addEventListener('syn:lyrics-editor:close', () => onLitLyricsEditorClose());
+  document.body.appendChild(el);
+  _litLyricsEditor = el;
+  return el;
+}
+function openLyricsEditorLit() {
+  const el = ensureLitLyricsEditor();
+  el.player = _litPlayer; el.t = t;
+  el.open({
+    title: $('title').value, artist: $('artist').value,
+    lyrics: $('lyrics').value.trim(), chords: $('chords').value.trim(),
+  });
+  // garante a faixa em edição tocando (igual ao legado)
+  if (currentEditorSong) {
+    const alreadyPlaying = current && current.filePath === currentEditorSong.filePath;
+    if (!alreadyPlaying) playFromCard(currentEditorSong);
+  }
+  // eleva o player acima do modal
+  const playerEl = $('player');
+  if (playerEl) {
+    _leLitPlayerWasHidden = playerEl.classList.contains('hidden');
+    playerEl.classList.remove('hidden');
+    playerEl.style.position = 'fixed'; playerEl.style.bottom = '0'; playerEl.style.left = '0'; playerEl.style.right = '0'; playerEl.style.zIndex = '96';
+  }
+}
+async function onLitLyricsEditorSave({ lyrics, chords }) {
+  $('lyrics').value = lyrics; $('chords').value = chords;
+  if (currentFilePath) await window.api.lyricsSetSyncStatus(currentFilePath, 'local'); // editar quebra a sincronia
+  await updateLyricsStatusCard();
+  saveDetailsWithSync('local'); // grava as tags no MP3 + reload
+}
+function onLitLyricsEditorClose() {
+  const playerEl = $('player');
+  if (playerEl) {
+    playerEl.style.position = ''; playerEl.style.bottom = ''; playerEl.style.left = ''; playerEl.style.right = '';
+    playerEl.style.zIndex = '';
+    if (_leLitPlayerWasHidden) playerEl.classList.add('hidden');
+  }
+}
+
 // --- Abrir o editor ---
 function openLyricsEditor() {
+  if (useLitLyricsEditor()) { openLyricsEditorLit(); return; }
   const modal = $('lyricsEditorModal');
   $('leTitle').textContent = $('title').value.trim() || '—';
   $('leArtist').textContent = $('artist').value.trim() || '—';
@@ -3840,7 +3895,10 @@ function closeNowPlaying() {
 function npOpen() { return !$('nowPlaying').classList.contains('hidden'); }
 
 // Editor de letra aberto? Bloqueia ações do mini-player que conflitam com a edição.
-function lyricsEditorOpen() { return !$('lyricsEditorModal').classList.contains('hidden'); }
+function lyricsEditorOpen() {
+  if (_litLyricsEditor && _litLyricsEditor.isOpen()) return true; // editor Lit aberto
+  return !$('lyricsEditorModal').classList.contains('hidden');
+}
 function blockedDuringLyricsEdit() {
   if (lyricsEditorOpen()) {
     toast(t('lyrics.toast.finishEdit'), '');
