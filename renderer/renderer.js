@@ -1488,11 +1488,15 @@ function renderEditorView() {
     box.appendChild(item);
   }
 
+  const liteEditor = !!customElements.get('syn-track-editor');
   const lyrics = get('lyrics');
   const lyricsVisible = !!lyrics;
-  $('evLyricsWrap').classList.toggle('hidden', !lyricsVisible);
+  // Redesign (ilha): o painel de letra é o CARRO-CHEFE → sempre visível (vazio convida a buscar).
+  // Legado: só aparece quando há letra.
+  $('evLyricsWrap').classList.toggle('hidden', !liteEditor && !lyricsVisible);
   // na visualização, mostra a letra sem os timestamps do LRC
   $('evLyrics').textContent = isSyncedLyrics(lyrics) ? lrcToPlain(lyrics) : lyrics;
+  if (liteEditor) updateLyricsStatusCard();   // atualiza o CTA de letra (lscTitle/lscSub/status)
 
   // Badge de status de sincronização na view mode
   if (currentFilePath) {
@@ -1519,14 +1523,22 @@ async function applyEditorColor(coverSrc) {
   $('editor').style.setProperty('--cv', pal ? `${pal.r}, ${pal.g}, ${pal.b}` : '124, 92, 255');
 }
 
-$('editorBack').addEventListener('click', hideEditor);
-$('editToggle').addEventListener('click', () => {
-  $('editor').classList.remove('view-mode');
-  $('editor').classList.add('edit-mode');
-});
-$('evPlay').addEventListener('click', () => { if (currentEditorSong) playFromCard(currentEditorSong); });
+// Editor: roteador de cliques por DELEGAÇÃO no backdrop (nó estável). Cobre tanto o markup
+// legado quanto a ilha <syn-track-editor> (que substitui o interior de #editor) — sobrevive
+// à troca de DOM sem precisar re-ligar listeners. Botões identificados por id via closest().
 $('editorBackdrop').addEventListener('click', (e) => {
-  if (e.target === $('editorBackdrop')) hideEditor();
+  if (e.target === $('editorBackdrop')) { hideEditor(); return; }
+  const hit = (id) => e.target.closest('#' + id);
+  if (hit('editorBack'))      { hideEditor(); return; }
+  if (hit('editToggle'))      { $('editor').classList.remove('view-mode'); $('editor').classList.add('edit-mode'); return; }
+  if (hit('editDone'))        { saveDetails(); return; }
+  if (hit('evPlay'))          { if (currentEditorSong) playFromCard(currentEditorSong); return; }
+  if (hit('removeImageBtn'))  { resetCover(); return; }
+  if (hit('adjustCoverBtn'))  { if (coverSourceDataUrl) openCropper(); return; }
+  if (hit('selectImageBtn'))  { onSelectImageClick(); return; }
+  if (hit('fetchBtn'))        { onFetchClick(); return; }
+  if (hit('lyricsStatusBtn')) { if (currentFilePath) openLyricsModal(); return; }
+  if (hit('deleteBtn'))       { onDeleteClick(); return; }
 });
 
 function resetCover() {
@@ -1555,19 +1567,15 @@ async function setCoverFromSource(srcDataUrl) {
   showCoverPreview(currentImageDataUrl);
 }
 
-$('selectImageBtn').addEventListener('click', async () => {
+// Cliques delegados pelo roteador do #editorBackdrop (selecionar/ajustar/remover capa).
+async function onSelectImageClick() {
   const p = await window.api.selectImage();
   if (!p) return;
   const dataUrl = await window.api.imagePreview(p);
   if (!dataUrl) { toast(t('editor.imageReadFail'), 'error'); return; }
   await setCoverFromSource(dataUrl);
   openCropper();
-});
-
-$('adjustCoverBtn').addEventListener('click', () => {
-  if (coverSourceDataUrl) openCropper();
-});
-$('removeImageBtn').addEventListener('click', () => resetCover());
+}
 
 // colar imagem do clipboard (Ctrl+V com a capa em foco)
 function readBlobAsDataUrl(blob) {
@@ -1600,7 +1608,7 @@ document.addEventListener('paste', async (e) => {
 });
 
 // Buscar metadados: fontes factuais (MusicBrainz/iTunes) → Gemini lacunas → consistência
-$('fetchBtn').addEventListener('click', async () => {
+async function onFetchClick() {
   if (!currentFilePath) return;
   const status = $('aiStatus');
   status.className = 'ai-status';
@@ -1638,7 +1646,7 @@ $('fetchBtn').addEventListener('click', async () => {
     cover: res.coverDataUrl ? t('editor.aiCover') : '',
     sources: src
   });
-});
+}
 
 // ==================== EDITOR IMERSIVO DE LETRAS ====================
 
@@ -1792,11 +1800,7 @@ function closeLyricsModal() {
 }
 
 // ---- Event listeners do lyricsModal ----
-$('lyricsStatusBtn').addEventListener('click', () => {
-  if (!currentFilePath) return;
-  openLyricsModal();
-});
-
+// (o botão #lyricsStatusBtn é tratado pelo roteador delegado do #editorBackdrop)
 $('lmCloseBtn').addEventListener('click', closeLyricsModal);
 // Fechar ao clicar fora do painel (no overlay = backdrop)
 $('lyricsModal').addEventListener('click', (e) => {
@@ -2774,17 +2778,16 @@ async function saveDetailsWithSync(lrclibSync) {
   if (current && current.filePath === currentFilePath) { npLyricsPath = null; loadCurrentLyrics(current.filePath); reloadCurrentAudio(); }
 }
 
-$('editDone').addEventListener('click', saveDetails);
-
-// Excluir música (botão dentro do editor) — abre a mesma modal de exclusão
-$('deleteBtn').addEventListener('click', () => {
+// Excluir música (botão dentro do editor) — abre a mesma modal de exclusão.
+// (#editDone e #deleteBtn são tratados pelo roteador delegado do #editorBackdrop)
+function onDeleteClick() {
   if (!currentFilePath) return;
   const s = songs.find((x) => x.filePath === currentFilePath)
     || deviceOnlySongs.find((x) => x.filePath === currentFilePath)
     || { filePath: currentFilePath, fileName: $('fileName').textContent, title: $('title').value, artist: $('artist').value };
   hideEditor();
   openDeleteModal(s);
-});
+}
 
 // ====================== Menu de opções da música (⋯) ======================
 let songMenuDocHandler = null;
@@ -4154,6 +4157,19 @@ _litReady.then((m) => {
         oldViz.replaceWith(v);
         _litViz = v;
         if (typeof npOpen === 'function' && npOpen() && isPlaying) v.active = true; // já tocando c/ NP aberta
+      }
+    }
+    // editor de detalhes Lit (Fase E, última ilha): substitui o INTERIOR legado de #editor
+    // pela ilha imersiva (display:contents, mesmos IDs). A cola do editor (openEditor/
+    // saveDetails/pipeline de capa/IA/letra) segue valendo sem reescrita; os cliques entram
+    // pelo roteador delegado do #editorBackdrop. Sob `electron .` (sem ilha) o markup legado fica.
+    if (customElements.get('syn-track-editor')) {
+      const sec = document.getElementById('editor');
+      if (sec && !sec.querySelector('syn-track-editor')) {
+        sec.innerHTML = '';
+        const te = document.createElement('syn-track-editor');
+        te.t = t;
+        sec.appendChild(te);
       }
     }
   } catch { _litToast = null; }

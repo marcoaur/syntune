@@ -93,7 +93,6 @@ export class SynLyrics extends ContainerMixin(SyntuneElement) {
     this._lastTop = -1;
     this._lastTs = 0;
     this._lastCenter = null;
-    this._reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
     this._onResize = () => { if (this.active) { this.#measure(); this._curTop = null; } };
   }
@@ -294,10 +293,10 @@ export class SynLyrics extends ContainerMixin(SyntuneElement) {
     const dt = (this._lastTs ? Math.min(100, now - this._lastTs) : 16) / 1000;
     this._lastTs = now;
     if (this._curTop == null) { this._curTop = target; this._vel = 0; }
-    // reduced-motion: sem mola, encaixa direto
-    if (this._reduceMotion) {
-      this._curTop = target; this._vel = 0;
-    } else {
+    // SEMPRE com mola (paridade com o karaokê legado, que nunca honrou
+    // prefers-reduced-motion). A varredura suave É o recurso — encaixar direto
+    // deixa a troca de linha "repentina". (Mesma decisão do syn-visualizer.)
+    {
       // saltos enormes (seek distante): começa a 1,2 janelas do alvo p/ não virar borrão
       if (Math.abs(target - this._curTop) > ch * 1.2) {
         this._curTop = target + Math.sign(this._curTop - target) * ch * 1.2;
