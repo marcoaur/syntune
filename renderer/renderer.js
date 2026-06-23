@@ -12,7 +12,7 @@ import { ICONS } from './modules/icons.js';
 // resolve. Não há mais fallback legado — os custom elements estão sempre registrados.
 import './components/index.js';
 // Capacidades headless (ARCHITECTURE-V2): acionáveis por qualquer um (toast-like).
-import { loading } from './components/capabilities.js';
+import { loading, palette } from './components/capabilities.js';
 
 // O main resolve o idioma (locale do sistema + cache em config.json) e entrega
 // o dicionário pronto. t() traduz chaves; tn() escolhe singular/plural;
@@ -195,67 +195,9 @@ async function makeCenterCrop(src, out = 640) {
   return canvas.toDataURL('image/jpeg', 0.92);
 }
 
-// Extrai a cor-chave (dominante e vibrante) de uma capa, p/ tingir o card.
-const paletteCache = new Map();
-async function getPalette(dataUrl) {
-  if (!dataUrl) return null;
-  if (paletteCache.has(dataUrl)) return paletteCache.get(dataUrl);
-
-  let pal = null;
-  try {
-    // URLs de protocolo custom precisam de CORS p/ getImageData; data URLs não.
-    // Se a carga CORS falhar, tenta sem (a paleta pode falhar no taint, mas é
-    // capturada pelo catch e vira null — nada quebra).
-    const needsCors = !dataUrl.startsWith('data:');
-    let img;
-    try { img = await loadImage(dataUrl, needsCors); }
-    catch { img = await loadImage(dataUrl); }
-    const S = 32;
-    const c = document.createElement('canvas');
-    c.width = S; c.height = S;
-    const ctx = c.getContext('2d');
-    ctx.drawImage(img, 0, 0, S, S);
-    const { data } = ctx.getImageData(0, 0, S, S);
-
-    // quantiza em baldes e pondera por saturação para achar a cor "chave"
-    const buckets = new Map();
-    let avgR = 0, avgG = 0, avgB = 0, avgN = 0;
-    for (let i = 0; i < data.length; i += 4) {
-      const r = data[i], g = data[i + 1], b = data[i + 2], a = data[i + 3];
-      if (a < 125) continue;
-      avgR += r; avgG += g; avgB += b; avgN++;
-      const max = Math.max(r, g, b), min = Math.min(r, g, b);
-      const sat = max === 0 ? 0 : (max - min) / max;
-      const lum = 0.299 * r + 0.587 * g + 0.114 * b;
-      if (lum < 28 || lum > 232) continue; // ignora quase preto/branco
-      const key = `${r >> 5},${g >> 5},${b >> 5}`;
-      const prev = buckets.get(key) || { r: 0, g: 0, b: 0, w: 0 };
-      const w = 1 + sat * 3; // valoriza cores saturadas
-      prev.r += r * w; prev.g += g * w; prev.b += b * w; prev.w += w;
-      buckets.set(key, prev);
-    }
-
-    let best = null;
-    for (const v of buckets.values()) {
-      if (!best || v.w > best.w) best = v;
-    }
-    let r, g, b;
-    if (best) {
-      r = Math.round(best.r / best.w);
-      g = Math.round(best.g / best.w);
-      b = Math.round(best.b / best.w);
-    } else if (avgN) {
-      r = Math.round(avgR / avgN); g = Math.round(avgG / avgN); b = Math.round(avgB / avgN);
-    }
-    if (r != null) {
-      const lum = 0.299 * r + 0.587 * g + 0.114 * b;
-      pal = { r, g, b, text: lum > 150 ? '#1d1d1f' : '#ffffff' };
-    }
-  } catch { /* sem paleta */ }
-
-  paletteCache.set(dataUrl, pal);
-  return pal;
-}
+// Cor-chave da capa → capacidade headless palette() (compute + cache). Delegate p/ não
+// tocar os call-sites (applyPalette/ambiente/editor/playlist/artista).
+function getPalette(dataUrl) { return palette().of(dataUrl); }
 
 // expõe a cor-chave da capa no card (--cv); o CSS aplica o acento por estado
 async function applyPalette(card, dataUrl) {

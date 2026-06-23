@@ -3,6 +3,7 @@
 // escapa stacking-context). Cada capacidade é um custom element autossuficiente em
 // components/capability/. Conforme a Fase 1 avança, entram aqui: confirm, menu, palette.
 import './capability/syn-loading.js';
+import { PaletteCapability } from './capability/palette.js';
 
 let _loading;
 /** Overlay de carregamento. `loading().show(msg)` / `loading().hide()`. */
@@ -12,4 +13,11 @@ export function loading() {
     document.body.appendChild(_loading);
   }
   return _loading;
+}
+
+let _palette;
+/** Cor-chave da capa (compute + cache). `await palette().of(url)` → {r,g,b,text}|null. */
+export function palette() {
+  if (!_palette) _palette = new PaletteCapability();
+  return _palette;
 }
