@@ -39,6 +39,7 @@ export class SynLyrics extends ContainerMixin(SyntuneElement) {
     // legado), o @lit/context não resolve → o renderer injeta o player aqui. É repassado às
     // folhas syn-chord-line embutidas (que também ficam fora do root).
     player: { attribute: false },
+    editMode: { type: Boolean },      // edição inline de acordes (advancedEdit + acordes ON)
     t: { attribute: false },          // função i18n (fallback p/ textos)
   };
 
@@ -56,7 +57,19 @@ export class SynLyrics extends ContainerMixin(SyntuneElement) {
     this.active = false;
     this.player = null;
     this._boundPlayer = null;
+    this.editMode = false;
     this.t = (k) => k;
+
+    // estado do editor inline (advancedEdit): seleção + arraste + overlays (hint/input).
+    this._sel = null;      // syn-chord-mark selecionado
+    this._selLine = null;  // syn-chord-line dono do selecionado (geometria p/ teclado)
+    this._drag = null;     // { mark, line, src, wasPlaying, moved, startX }
+    this._hint = null;     // div fixa com o timestamp (criada sob demanda)
+    this._hintTimer = null;
+    this._suppressClick = false;
+    this._onDocMove = (e) => this.#dragMove(e);
+    this._onDocUp = () => this.#dragEnd();
+    this._onDocKey = (e) => this.#editKey(e);
 
     // CONECTADO: tempo ao vivo do player (chega async via context no <syn-app-root>).
     this._time = new MediaTimeController(this, null);
@@ -91,11 +104,32 @@ export class SynLyrics extends ContainerMixin(SyntuneElement) {
     this.setAttribute('role', 'list');
     this.setAttribute('aria-label', this.t('player.lyrics') || 'Letra');
     window.addEventListener('resize', this._onResize);
+    // editor inline (gestos): pointerdown/dblclick no host; move/up/key no document.
+    this.addEventListener('pointerdown', (e) => this.#dragStart(e));
+    this.addEventListener('dblclick', (e) => this.#dblclick(e));
+    // o syn-chord-mark dá stopPropagation no dblclick nativo → renomeia via evento custom.
+    this.addEventListener('syn:chord:edit', (e) => {
+      if (!this.editMode) return;
+      const m = e.composedPath().find((el) => el.tagName === 'SYN-CHORD-MARK');
+      if (m) this.#editText(m, false);
+    });
+    // suprime o seek-da-linha logo após um arraste (o click sintético cairia na .np-lyric).
+    this.addEventListener('click', (e) => {
+      if (this._suppressClick) { this._suppressClick = false; e.stopPropagation(); e.preventDefault(); }
+    }, true);
+    document.addEventListener('pointermove', this._onDocMove);
+    document.addEventListener('pointerup', this._onDocUp);
+    // keydown em CAPTURA: roda antes dos handlers globais (←/→ = faixa) → stopImmediate vence.
+    document.addEventListener('keydown', this._onDocKey, true);
   }
 
   disconnectedCallback() {
     super.disconnectedCallback();
     window.removeEventListener('resize', this._onResize);
+    document.removeEventListener('pointermove', this._onDocMove);
+    document.removeEventListener('pointerup', this._onDocUp);
+    document.removeEventListener('keydown', this._onDocKey, true);
+    this.#hideHint();
     this._raf.stop();
   }
 
@@ -123,7 +157,9 @@ export class SynLyrics extends ContainerMixin(SyntuneElement) {
         const nextStart = (idx + 1 < vis.length) ? vis[idx + 1].t : Infinity;
         const bucket = hasChords ? chords.filter((c) => c.t >= start - 0.001 && c.t < nextStart - 0.001) : [];
         const end = (nextStart !== Infinity) ? nextStart : (bucket.length ? bucket[bucket.length - 1].t + 4 : start + 8);
-        out.push({ kind: bucket.length ? 'verse-chords' : 'verse', t: ln.t, start, end, text: ln.text, chords: bucket });
+        // em edição mostra a faixa de acordes mesmo VAZIA (gutter p/ duplo-clique = criar)
+        const showRow = bucket.length > 0 || (this.editMode && hasChords);
+        out.push({ kind: showRow ? 'verse-chords' : 'verse', t: ln.t, start, end, text: ln.text, chords: bucket });
       });
     } else if (hasChords) {
       // instrumental: acordes em grupos de 4, espalhados no tempo do grupo
@@ -139,8 +175,8 @@ export class SynLyrics extends ContainerMixin(SyntuneElement) {
     return { rows: out, synced, hasChords };
   }
 
-  // acordes {t,text} → {time,label} (contrato da folha syn-chord-line)
-  #toMarks(list) { return (list || []).map((c) => ({ time: c.t, label: c.text })); }
+  // acordes {t,text} → {time,label,src} (src = ref opaca p/ o editor mutar o estado)
+  #toMarks(list) { return (list || []).map((c) => ({ time: c.t, label: c.text, src: c })); }
 
   #seekLine(t) {
     const p = this.player || this._player.value;
@@ -174,7 +210,7 @@ export class SynLyrics extends ContainerMixin(SyntuneElement) {
     }
     const line = html`<syn-chord-line
       .chords=${this.#toMarks(r.chords)} .start=${r.start} .end=${r.end}
-      .accent=${this.accent} .active=${false} .player=${this.player}
+      .accent=${this.accent} .active=${false} .player=${this.player} .editable=${this.editMode}
     ></syn-chord-line>`;
     if (r.kind === 'chord-only') {
       return html`<div class="np-lyric np-chord-only" data-t=${r.t}
@@ -316,6 +352,160 @@ export class SynLyrics extends ContainerMixin(SyntuneElement) {
       this._lastCenter = focusEl;
     }
   }
+
+  // ===================== Editor inline de acordes (advancedEdit) =====================
+  // Mestre dos gestos sobre os syn-chord-mark embutidos; muta os objetos COMPARTILHADOS
+  // de `chordsData` (= o mesmo array `npChordsLines` do renderer) → o save legado os lê.
+  // Eventos `syn:chords:change` avisam o renderer (marca "sujo" / morph do botão salvar).
+
+  #markFromEvent(e) {
+    const path = e.composedPath();
+    const mark = path.find((el) => el.tagName === 'SYN-CHORD-MARK');
+    const line = path.find((el) => el.tagName === 'SYN-CHORD-LINE');
+    return { mark, line };
+  }
+  #lineOf(mark) { const r = mark && mark.getRootNode(); return r && r.host && r.host.tagName === 'SYN-CHORD-LINE' ? r.host : null; }
+  #markBySrc(src) {
+    for (const a of this._anchors) {
+      if (!a.chordLine || !a.chordLine.markEls) continue;
+      for (const m of a.chordLine.markEls) if (m.src === src) return m;
+    }
+    return null;
+  }
+  #isPlaying() { const p = this.player || this._player.value; const a = p && p.audio; return a ? !a.paused : false; }
+  #pause() { const p = this.player || this._player.value; if (p && p.audio) p.audio.pause(); }
+  #play() { const p = this.player || this._player.value; if (p && p.audio) p.audio.play().catch(() => {}); }
+  #dirty() { this.emit('syn:chords:change', {}); } // renderer → markChordsDirty()
+
+  #select(mark, line) {
+    if (this._sel === mark) { if (line) this._selLine = line; return; }
+    if (this._sel) this._sel.selected = false;
+    this._sel = mark || null;
+    this._selLine = mark ? (line || this.#lineOf(mark)) : null;
+    if (this._sel) this._sel.selected = true;
+  }
+
+  #dragStart(e) {
+    if (!this.editMode) return;
+    const { mark, line } = this.#markFromEvent(e);
+    if (mark && line) {
+      this._drag = { mark, line, src: mark.src, wasPlaying: this.#isPlaying(), moved: false, startX: e.clientX };
+      this.#select(mark, line);
+    } else {
+      this.#select(null); // clique fora de um acorde → desseleciona
+    }
+  }
+  #dragMove(e) {
+    const d = this._drag;
+    if (!d) return;
+    if (!d.moved) {
+      if (Math.abs(e.clientX - d.startX) < 4) return; // limiar: distingue clique de arraste
+      d.moved = true;
+      if (d.wasPlaying) this.#pause(); // auto-pausa ao começar a arrastar
+    }
+    let tt = d.line.timeFromClientX(e.clientX);
+    tt = Math.min(d.line.end - 0.001, Math.max(d.line.start, tt));
+    d.src.t = Math.round(tt * 1000) / 1000;
+    d.mark.time = d.src.t;
+    d.line.placeMark(d.mark, d.src.t);
+    this.#showHint(d.mark, d.src.t);
+    this.#dirty();
+    e.preventDefault();
+  }
+  #dragEnd() {
+    const d = this._drag;
+    if (!d) return;
+    this._drag = null;
+    this.#hideHint();
+    if (d.moved) this._suppressClick = true; // não deixa o seek-da-linha disparar no fim do arraste
+    if (d.moved && d.wasPlaying) this.#play();
+  }
+
+  #dblclick(e) {
+    if (!this.editMode) return;
+    const { mark, line } = this.#markFromEvent(e);
+    if (mark) { this.#editText(mark, false); return; }
+    if (line) this.#createChord(line, e.clientX);
+  }
+
+  async #createChord(line, clientX) {
+    let tt = line.timeFromClientX(clientX);
+    tt = Math.min(line.end - 0.001, Math.max(line.start, tt));
+    const obj = { t: Math.round(tt * 1000) / 1000, text: 'C' };
+    (this.chordsData || (this.chordsData = [])).push(obj);
+    this.#dirty();
+    this.requestUpdate();
+    await this.updateComplete; await line.updateComplete;
+    const mark = this.#markBySrc(obj);
+    if (mark) this.#editText(mark, true); // abre o nome; cancelar/vazio remove o novo
+  }
+
+  #editText(mark, isNew) {
+    this.#select(mark, this.#lineOf(mark));
+    const src = mark.src;
+    const inp = document.createElement('input');
+    inp.type = 'text'; inp.className = 'np-chord-input'; inp.value = src.text || '';
+    const r = mark.getBoundingClientRect();
+    inp.style.cssText = `position:fixed;left:${r.left + r.width / 2}px;top:${r.top}px;transform:translateX(-50%);z-index:210`;
+    document.body.appendChild(inp);
+    inp.focus(); inp.select();
+    let done = false;
+    const commit = (keep) => {
+      if (done) return; done = true; inp.remove();
+      const v = inp.value.trim();
+      if (keep && v) { if (v !== src.text) { src.text = v; this.#dirty(); } this.requestUpdate(); }
+      else if (isNew) { const i = this.chordsData.indexOf(src); if (i >= 0) this.chordsData.splice(i, 1); this._sel = null; this.requestUpdate(); }
+      else { this.requestUpdate(); }
+    };
+    inp.addEventListener('keydown', (ev) => {
+      ev.stopPropagation();
+      if (ev.key === 'Enter') { ev.preventDefault(); commit(true); }
+      else if (ev.key === 'Escape') { ev.preventDefault(); commit(false); }
+    });
+    inp.addEventListener('blur', () => commit(true));
+  }
+
+  #editKey(e) {
+    if (!this.editMode || !this._sel) return;
+    const ae = document.activeElement;
+    if (ae && ae.classList && ae.classList.contains('np-chord-input')) return; // editando nome
+    const src = this._sel.src, line = this._selLine;
+    if (e.key === 'Escape') { e.preventDefault(); e.stopImmediatePropagation(); this.#select(null); return; }
+    if (e.key === 'Delete' || e.key === 'Backspace') {
+      e.preventDefault(); e.stopImmediatePropagation();
+      const i = this.chordsData.indexOf(src); if (i >= 0) this.chordsData.splice(i, 1);
+      this._sel = null; this.#dirty(); this.requestUpdate();
+    } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+      // stopImmediate: sem isso o ←/→ global trocaria de faixa ao ajustar o acorde.
+      e.preventDefault(); e.stopImmediatePropagation();
+      const step = e.shiftKey ? 0.1 : (e.altKey ? 0.001 : 0.01); // Shift=100ms · Alt=1ms · padrão=10ms
+      let tt = src.t + (e.key === 'ArrowRight' ? step : -step);
+      if (line) tt = Math.min(line.end - 0.001, Math.max(line.start, tt));
+      src.t = Math.round(tt * 1000) / 1000;
+      this._sel.time = src.t;
+      if (line) line.placeMark(this._sel, src.t);
+      this.#showHint(this._sel, src.t);
+      clearTimeout(this._hintTimer); this._hintTimer = setTimeout(() => this.#hideHint(), 900);
+      this.#dirty();
+    }
+  }
+
+  #stamp(s) {
+    s = Math.max(0, s);
+    const mm = String(Math.floor(s / 60)).padStart(2, '0');
+    const ss = String(Math.floor(s % 60)).padStart(2, '0');
+    const ms = String(Math.round((s - Math.floor(s)) * 1000)).padStart(3, '0');
+    return `${mm}:${ss}.${ms}`;
+  }
+  #showHint(mark, tSec) {
+    let h = this._hint;
+    if (!h) { h = document.createElement('div'); h.className = 'np-chord-hint'; document.body.appendChild(h); this._hint = h; }
+    h.textContent = this.#stamp(tSec); h.classList.remove('hidden');
+    const r = mark.getBoundingClientRect();
+    h.style.left = (r.left + r.width / 2) + 'px';
+    h.style.top = (r.top - 6) + 'px';
+  }
+  #hideHint() { if (this._hint) this._hint.classList.add('hidden'); }
 }
 
 customElements.define('syn-lyrics', SynLyrics);

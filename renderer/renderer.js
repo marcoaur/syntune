@@ -4186,7 +4186,7 @@ function updateChordsBtn() {
 // (advancedEdit) depende da camada de gestos sobre os .np-chord legados, cuja migração é um
 // sub-passo posterior; nesse modo cai no legado. <syn-lyrics> vive DENTRO do #npLyrics e
 // reusa toda a CSS .np-lyrics-* (light-DOM); o renderer só lhe entrega o estado (props down).
-function useLitLyrics() { return !!customElements.get('syn-lyrics') && !advancedEdit; }
+function useLitLyrics() { return !!customElements.get('syn-lyrics'); }
 function litLyricsEl() { const box = $('npLyrics'); return box ? box.querySelector(':scope > syn-lyrics') : null; }
 // liga/desliga o rAF da ilha conforme o karaokê está visível (NP aberta + lyrics-mode)
 function syncLitLyrics() { const ly = litLyricsEl(); if (ly) ly.active = npOpen() && $('nowPlaying').classList.contains('lyrics-mode'); }
@@ -4196,12 +4196,13 @@ function renderNpLyricsLit(box) {
   const allChords = (npChordsLines || []).filter((c) => c.text);
   const trackHasChords = allChords.length > 0;
   const hasChords = trackHasChords && npShowChords;
+  const editMode = advancedEdit && hasChords; // edição inline de acordes
   updateChordsBtn();
   npLyricSlots = hasChords ? 6 : 5;
   const showTrack = synced || hasChords;
   box.classList.toggle('synced', showTrack);
   box.classList.toggle('chords-on', hasChords);
-  box.classList.toggle('edit-mode', false); // edição inline = caminho legado
+  box.classList.toggle('edit-mode', editMode);
   $('nowPlaying').classList.toggle('np-synced', showTrack);
   npChordAccent = chordAccentRGB(barTargetPal);
   box.style.setProperty('--chord-accent', npChordAccent.join(','));
@@ -4209,14 +4210,19 @@ function renderNpLyricsLit(box) {
   npLyricAnchors = []; npLyricTrack = null; npLastCenter = null; npSelChordEl = null;
 
   let ly = box.querySelector(':scope > syn-lyrics');
-  if (!ly) { box.innerHTML = ''; ly = document.createElement('syn-lyrics'); box.appendChild(ly); }
+  if (!ly) {
+    box.innerHTML = ''; ly = document.createElement('syn-lyrics'); box.appendChild(ly);
+    // editor inline: a ilha muta npChordsLines (mesma ref) e avisa → marca "sujo" (botão salvar)
+    ly.addEventListener('syn:chords:change', () => markChordsDirty());
+  }
   ly.t = t;
   ly.player = _litPlayer;                       // facade por propriedade (fora do app-root)
   ly.accent = npChordAccent.join(',');
   ly.synced = npLyricsLines;
-  ly.chordsData = npChordsLines || [];
+  ly.chordsData = npChordsLines || [];          // MESMA ref do estado → o save legado a lê
   ly.showChords = npShowChords;
   ly.plain = npLyricsPlain || '';
+  ly.editMode = editMode;
   ly.active = npOpen() && $('nowPlaying').classList.contains('lyrics-mode');
 }
 

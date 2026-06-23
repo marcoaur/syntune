@@ -90,3 +90,60 @@ describe('syn-lyrics (karaokê / container conectado)', () => {
     expect(sought).to.be.closeTo(9.02, 0.001);
   });
 });
+
+describe('syn-lyrics — editor inline (advancedEdit)', () => {
+  async function mount(chordsArr) {
+    const el = await fixture(html`<syn-lyrics .synced=${lines} .chordsData=${chordsArr}
+      .showChords=${true} .editMode=${true}></syn-lyrics>`);
+    await el.updateComplete;
+    return el;
+  }
+
+  it('editMode: todo verso ganha syn-chord-line (gutter) e fica editável', async () => {
+    const el = await mount([{ t: 6, text: 'G' }]);
+    const cls = el.querySelectorAll('syn-chord-line');
+    expect(cls.length).to.equal(3);          // gutter em todos os versos
+    expect(cls[0].editable).to.be.true;
+  });
+
+  it('Delete no acorde selecionado remove do estado + emite syn:chords:change', async () => {
+    const arr = [{ t: 6, text: 'G' }];
+    const el = await mount(arr);
+    const line = el.querySelector('syn-chord-line'); await line.updateComplete;
+    const mark = line.shadowRoot.querySelector('syn-chord-mark'); await mark.updateComplete;
+    let changed = 0; el.addEventListener('syn:chords:change', () => changed++);
+    // seleciona via pointerdown real (composedPath inclui mark + line)
+    mark.shadowRoot.querySelector('button').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, composed: true }));
+    expect(el._sel).to.equal(mark);
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete' }));
+    expect(arr.length).to.equal(0);
+    expect(changed).to.be.greaterThan(0);
+  });
+
+  it('renomear (syn:chord:edit → input → Enter) muta o texto + marca sujo', async () => {
+    const arr = [{ t: 6, text: 'G' }];
+    const el = await mount(arr);
+    const line = el.querySelector('syn-chord-line'); await line.updateComplete;
+    const mark = line.shadowRoot.querySelector('syn-chord-mark'); await mark.updateComplete;
+    let changed = 0; el.addEventListener('syn:chords:change', () => changed++);
+    mark.dispatchEvent(new CustomEvent('syn:chord:edit', { bubbles: true, composed: true }));
+    const inp = document.querySelector('input.np-chord-input');
+    expect(inp).to.exist;
+    inp.value = 'Am';
+    inp.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    expect(arr[0].text).to.equal('Am');
+    expect(changed).to.be.greaterThan(0);
+  });
+
+  it('ArrowRight no selecionado empurra o tempo (10ms) + emite change', async () => {
+    const arr = [{ t: 6, text: 'G' }];
+    const el = await mount(arr);
+    const line = el.querySelector('syn-chord-line'); await line.updateComplete;
+    const mark = line.shadowRoot.querySelector('syn-chord-mark'); await mark.updateComplete;
+    let changed = 0; el.addEventListener('syn:chords:change', () => changed++);
+    mark.shadowRoot.querySelector('button').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, composed: true }));
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight' }));
+    expect(arr[0].t).to.be.closeTo(6.01, 0.0001);
+    expect(changed).to.be.greaterThan(0);
+  });
+});

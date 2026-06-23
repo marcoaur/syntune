@@ -15,6 +15,12 @@ export class SynChordMark extends SyntuneElement {
   static properties = {
     label: { type: String },
     time: { type: Number },
+    // edição inline (advancedEdit): `src` = referência opaca ao objeto de acorde do estado
+    // (o editor no pai muta esse objeto); `selected` desenha o contorno; `editable` = cursor
+    // de arraste. Reflexos como atributo p/ a CSS reagir sem re-render.
+    src: { attribute: false },
+    selected: { type: Boolean, reflect: true },
+    editable: { type: Boolean, reflect: true },
   };
 
   static styles = [
@@ -37,6 +43,13 @@ export class SynChordMark extends SyntuneElement {
       @media (prefers-reduced-motion: reduce) {
         :host { transform: translateX(-50%); }
       }
+      /* edição: cursor de arraste + contorno do selecionado (espelha .np-chord.sel legado) */
+      :host([editable]) button { cursor: grab; user-select: none; }
+      :host([editable]) button:active { cursor: grabbing; }
+      :host([selected])::after {
+        content: ''; position: absolute; left: -6px; right: -6px; top: -4px; bottom: -4px;
+        border: 1.5px solid rgba(255, 255, 255, .65); border-radius: 6px; pointer-events: none;
+      }
     `,
   ];
 
@@ -44,6 +57,9 @@ export class SynChordMark extends SyntuneElement {
     super();
     this.label = '';
     this.time = 0;
+    this.src = null;
+    this.selected = false;
+    this.editable = false;
   }
 
   #emit(name) { this.emit(name, { time: this.time, label: this.label }); }

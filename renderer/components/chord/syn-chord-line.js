@@ -39,6 +39,9 @@ export class SynChordLine extends ContainerMixin(SyntuneElement) {
     // espelha o legado, onde só a linha EM FOCO mostra a varredura. Default true mantém
     // a ilha de acordes standalone (Fase 0) sempre com a barra visível.
     active: { type: Boolean },
+    // edição inline (advancedEdit): em modo editável o clique NÃO busca (seleção/arraste
+    // são geridos pelo editor no pai); o pai usa a geometria pública (timeFromClientX/placeMark).
+    editable: { type: Boolean },
   };
 
   static styles = [
@@ -74,6 +77,7 @@ export class SynChordLine extends ContainerMixin(SyntuneElement) {
     this.end = 1;
     this.accent = '124, 92, 255';
     this.active = true;
+    this.editable = false;
     this.player = null;
     this._boundPlayer = null;
 
@@ -90,8 +94,11 @@ export class SynChordLine extends ContainerMixin(SyntuneElement) {
 
     // CONTAINER: relê o feedback dos filhos (sobe por composed) → seek + re-emite p/ cima.
     this.addEventListener('syn:chord:select', (e) => {
-      const p = this.player || this._player.value;
-      if (p && typeof p.seek === 'function') p.seek(e.detail.time + 0.02);
+      // em edição o clique não busca — seleção/arraste ficam com o editor (pai).
+      if (!this.editable) {
+        const p = this.player || this._player.value;
+        if (p && typeof p.seek === 'function') p.seek(e.detail.time + 0.02);
+      }
       this.emit('syn:chordline:select', e.detail); // re-emissão padronizada pro pai
     });
     this.addEventListener('syn:chord:edit', (e) => this.emit('syn:chordline:edit', e.detail));
@@ -106,12 +113,24 @@ export class SynChordLine extends ContainerMixin(SyntuneElement) {
 
   // Filhos por categoria (em shadow, pois são data-driven a partir de `chords`).
   get #marks() { return [...this.renderRoot.querySelectorAll('syn-chord-mark')]; }
+  get markEls() { return this.#marks; } // público p/ o editor (syn-lyrics)
 
   #map(f) { return `calc(${CHORD_INSET}px + ${f} * (100% - ${2 * CHORD_INSET}px))`; }
   #frac(time) {
     const span = Math.max(0.1, this.end - this.start);
     return Math.min(1, Math.max(0, (time - this.start) / span));
   }
+
+  // --- geometria pública p/ o editor inline (advancedEdit) ---
+  // tempo (s) a partir da posição X do ponteiro dentro do trilho útil (mesmo inset da barra)
+  timeFromClientX(clientX) {
+    const r = this.getBoundingClientRect();
+    const usable = Math.max(1, r.width - 2 * CHORD_INSET);
+    const f = Math.min(1, Math.max(0, (clientX - r.left - CHORD_INSET) / usable));
+    return this.start + f * (this.end - this.start);
+  }
+  // reposiciona um mark imperativamente (arraste/nudge sem re-render)
+  placeMark(markEl, time) { if (markEl) markEl.style.left = this.#map(this.#frac(time)); }
 
   // PROPS DOWN estáticas: posição/accent dos filhos derivam das props → em updated() (não por frame).
   updated() {
@@ -147,7 +166,7 @@ export class SynChordLine extends ContainerMixin(SyntuneElement) {
       <div class="sweep"></div>
       <div class="head"></div>
       ${(this.chords || []).map((c) => html`
-        <syn-chord-mark .label=${c.label} .time=${c.time}></syn-chord-mark>
+        <syn-chord-mark .label=${c.label} .time=${c.time} .src=${c.src} .editable=${this.editable}></syn-chord-mark>
       `)}
     `;
   }

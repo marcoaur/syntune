@@ -247,7 +247,7 @@ extraídos do que já funcionou. Mudar arquétipo depois = caro; por isso só as
 | Visualizer | `syn-visualizer` | canvas + Web Audio; RafController; **nunca** re-render por frame; pausa oculto | ☑ fiado+confirmado — anel circular idêntico ao legado; recebe analyser/freqData/coverEl/palette/active do renderer; light-DOM (`display:contents`, canvas `.np-viz`) |
 | Karaokê (letra) | `syn-lyrics` | scroll por transform (mola), MediaTimeController | ☑ componente+teste+fiado+**gate de app OK** (usuário testou à exaustão, sem bugs); swap guardado (Lit no bundle, legado sob `electron .`/edição inline) |
 | Chords overlay | `syn-chord-line` (em ctx) | barra/glow imperativos; já provado no piloto | ☑ reusado por `syn-lyrics` (1 por verso, janela `[verso.t, próximo.t]`); ganhou `.active` (gate da varredura) + `.player` (facade fora do app-root) |
-| Editor inline de acorde | controller sobre `syn-chord-line` | gestos (drag/setas/criar/apagar), dirty/save | ☐ (advancedEdit segue no legado por ora) |
+| Editor inline de acorde | editor em `syn-lyrics` sobre `syn-chord-line` | gestos (drag/setas/criar/apagar/renomear), dirty/save | ◐ componente+teste+fiado (`editMode`; muta `npChordsLines` compartilhado → save legado o lê; keydown em captura vence o ←/→ global); **gate de app pendente** |
 | Editor de letra (tap-time) | `syn-lyrics-editor` | reusa mecânica do inline | ☐ |
 | Editor de detalhes (tags) | `syn-track-editor` | form + IA enrich + cropper | ☐ |
 
