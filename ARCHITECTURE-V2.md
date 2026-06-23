@@ -99,13 +99,21 @@ O orquestrador mínimo é um COMPONENTE, não um script.
 | 0 | infra de capacidades (`capabilities.js`) | baixo | ☑ |
 | 1 | capacidades: loading, palette, confirm, menu | baixo, drena geral | ☑ |
 | ~~2~~ | ~~`syn-ipc` bridge isolado~~ — **CANCELADA (cerimônia)** | — | dropada |
-| 2′ | engines (cada dona do próprio IPC+eventos): downloader · device-watcher · scrobbler | médio-alto (acopladas) | — |
-| 3 | `syn-audio` (grafo Web Audio + EQ) | ⚠️ alto | — |
-| 4 | views frias→quentes: settings → add → playlists → library/artist → devices → track-editor | médio | — |
+| 2 | **view AUTOSSUFICIENTE: `syn-settings`** (config isolada, sem núcleo) | baixo | ☑ |
+| **3** | **STORE-NÚCLEO + player facade** (`library`/`songs`, `currentTrack`/`isPlaying`) — PRÉ-REQUISITO das views acopladas | ⚠️ alto (estado core) | **PRÓXIMO** |
+| 4 | views ACOPLADAS (consomem o store): playlists · add+downloader · devices · library/artist | médio (pós-store) | — |
 | 5 | `syn-now-playing` (núcleo/hot-path) | ⚠️ alto, por último | — |
-| 6 | event-bus + store-mínimo + app-root shell (quando a coordenação cross-component aparecer) | médio | — |
+| 6 | `syn-audio` (grafo Web Audio + EQ) · engines (scrobbler) | ⚠️ alto | — |
 | 7 | main Ciclo 6 (IPC modules) — paralelo | baixo-médio | — |
 | 8 | renderer.js → entry trivial + limpar markup legado | baixo | — |
+
+**ACHADO CRÍTICO (pós-syn-settings):** `syn-settings` foi extraível limpo porque é
+AUTOSSUFICIENTE (config isolada, zero núcleo). TODAS as outras views (playlists/add/devices/
+library/now-playing) **partilham o núcleo** (`songs`/biblioteca + player + devices). Extrair
+qualquer uma SEM o store-núcleo = componente com ~10 deps injetadas (`songs`, `buildSongCard`,
+`playList`, `activeDevice`…) → acoplado disfarçado, contradiz a independência. **Logo o
+store-núcleo (Fase 3) é PRÉ-REQUISITO e sobe na ordem** — antes das views acopladas, não depois.
+É a peça de maior risco (mexe no estado central) → sessão dedicada, behavior-gate por subsistema.
 
 **Crítica (revisão pós-Fase 1):** a Fase 2 original (`syn-ipc` bridge + mover 79 `window.api.*`)
 é CERIMÔNIA prematura — `window.api` já é o bridge (preload), e sem consumidores (engines/
