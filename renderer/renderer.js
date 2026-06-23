@@ -2952,7 +2952,6 @@ function closeNowPlaying() {
   closeViewAnimated($('nowPlaying'));
   hideNpPanels(); // EQ/fila imersivos não sobrevivem fora da NP
   stopNpViz();
-  stopLyricScroll();
   { const ly = litLyricsEl(); if (ly) ly.active = false; } // para o rAF da ilha Lit ao fechar
   npStopIdle();
   if (npIsFullscreen) toggleNpFullscreen(); // sai da tela cheia ao recolher
@@ -3004,7 +3003,7 @@ async function toggleNpFullscreen() {
   $('nowPlaying').classList.toggle('np-fs', npIsFullscreen);
   $('npFullscreen').innerHTML = npIsFullscreen ? ICONS.minimize : ICONS.maximize;
   $('npFullscreen').title = npIsFullscreen ? t('player.exitFullscreen') : t('player.fullscreen');
-  setTimeout(() => { if (npOpen()) { sizeNpViz(); if (npLyricScrollRAF) measureLyrics(); } }, 120); // recalcula a superfície após o resize
+  setTimeout(() => { if (npOpen()) sizeNpViz(); }, 120); // recalcula a superfície após o resize
 }
 $('npFullscreen').addEventListener('click', toggleNpFullscreen);
 
@@ -3257,34 +3256,6 @@ function chordAccentRGB(pal) {
 // Constrói uma linha de acordes posicionados horizontalmente pelo tempo dentro de
 // [start, end]. A varredura (underline) e o ponto-cabeça ficam na BASE da linha — não
 // cruzam o texto do acorde. Devolve { row, sweepEl, headEl, chords:[{t,el}] }.
-function makeChordRow(list, start, end) {
-  const row = document.createElement('div');
-  row.className = 'np-chord-row';
-  const sweep = document.createElement('div');
-  sweep.className = 'np-chord-sweep';
-  const head = document.createElement('div');
-  head.className = 'np-chord-head';
-  row.appendChild(sweep);
-  row.appendChild(head);
-  const span2 = Math.max(0.1, end - start);
-  const chs = [];
-  for (const c of list) {
-    const span = document.createElement('span');
-    span.className = 'np-chord';
-    span.textContent = c.text;
-    const f = Math.min(1, Math.max(0, (c.t - start) / span2));
-    span.style.left = chordSpanFromFraction(f);
-    span._src = c; // referência ao objeto em npChordsLines (edição inline)
-    span.addEventListener('click', (e) => {
-      e.stopPropagation();
-      if (chordEditActive()) { selectChord(span); return; } // edição: clique seleciona, não busca
-      audio.currentTime = c.t + 0.02; if (audio.paused) audio.play(); updateKaraoke();
-    });
-    row.appendChild(span);
-    chs.push({ src: c, el: span });
-  }
-  return { row, sweepEl: sweep, headEl: head, chords: chs };
-}
 
 const DISK_ICON = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>';
 
@@ -3359,148 +3330,15 @@ function renderNpLyricsLit(box) {
   ly.active = npOpen() && $('nowPlaying').classList.contains('lyrics-mode');
 }
 
+// Karaokê = ilha Lit <syn-lyrics>; o renderer só lhe entrega o estado (props down).
 function renderNpLyrics() {
   const box = $('npLyrics');
-  if (!box) return;
-  if (useLitLyrics()) { renderNpLyricsLit(box); return; }
-  box.innerHTML = '';
-  npLastCenter = null; npLyricAnchors = []; npLyricTrack = null; npLyricLastTop = -1;
-  npSelChordEl = null; // os elementos são recriados; evita referência a acorde destacado órfão
-  const synced = !!(npLyricsLines && npLyricsLines.length);
-  const allChords = (npChordsLines || []).filter((c) => c.text);
-  const trackHasChords = allChords.length > 0;
-  const hasChords = trackHasChords && npShowChords; // toggle: usuário pode ocultar
-  const chords = hasChords ? allChords : [];
-  updateChordsBtn(); // visibilidade (tem acordes?) + habilitação (modo karaokê?)
-  // janela: 6 linhas quando há acordes (2 passadas · 2 em evidência · 2 próximas), senão 5
-  npLyricSlots = hasChords ? 6 : 5;
-
-  const showTrack = synced || hasChords;
-  box.classList.toggle('synced', showTrack);
-  box.classList.toggle('chords-on', hasChords);
-  box.classList.toggle('edit-mode', advancedEdit && hasChords);
-  $('nowPlaying').classList.toggle('np-synced', showTrack);
-  // cor de destaque dos acordes derivada da capa (var CSS p/ acordes, varredura e cabeça)
-  npChordAccent = chordAccentRGB(barTargetPal);
-  box.style.setProperty('--chord-accent', npChordAccent.join(','));
-
-  if (synced) {
-    // só as linhas com texto entram (linhas vazias do LRC viram pausa)
-    const vis = npLyricsLines.filter((l) => l.text);
-    const track = document.createElement('div');
-    track.className = 'np-lyrics-track';
-    track.style.transform = 'translate3d(0,0,0)';
-    npLyricTrack = track;
-
-    // introdução: acordes antes da 1ª linha ganham linha PRÓPRIA (corrige o empilhamento
-    // à esquerda); sem acordes, 3 pontos quando a 1ª linha demora > 3s.
-    const introChords = (hasChords && vis.length) ? chords.filter((c) => c.t < vis[0].t - 0.001) : [];
-    if (vis.length && introChords.length) {
-      const el = document.createElement('div');
-      el.className = 'np-lyric np-chord-only';
-      const cr = makeChordRow(introChords, 0, vis[0].t);
-      el.appendChild(cr.row);
-      track.appendChild(el);
-      const a0 = { t: 0, el, start: 0, end: vis[0].t, sweepEl: cr.sweepEl, headEl: cr.headEl, chords: cr.chords };
-      cr.chords.forEach((cc) => { cc.el._anchor = a0; });
-      cr.row._anchor = a0;
-      npLyricAnchors.push(a0);
-    } else if (vis.length && vis[0].t > KARAOKE_GAP_MIN) {
-      const ig = document.createElement('div');
-      ig.className = 'np-lyric np-interlude';
-      ig.innerHTML = '<i></i><i></i><i></i>';
-      track.appendChild(ig);
-      npLyricAnchors.push({ t: 0, el: ig, dots: ig.querySelectorAll('i'), g0: 0, g1: vis[0].t });
-    }
-
-    vis.forEach((ln, idx) => {
-      const el = document.createElement('div');
-      el.className = 'np-lyric';
-      el.addEventListener('click', () => { audio.currentTime = ln.t + 0.02; if (audio.paused) audio.play(); updateKaraoke(); });
-
-      const start = ln.t;
-      const nextStart = (idx + 1 < vis.length) ? vis[idx + 1].t : Infinity;
-      // acordes deste intervalo (intro já tratada) — fronteiras de LETRA, estáveis
-      const bucket = hasChords ? chords.filter((c) => c.t >= start - 0.001 && c.t < nextStart - 0.001) : [];
-      // fim do intervalo: próxima linha; no ÚLTIMO verso usa último acorde + margem.
-      // NÃO usa audio.duration → determinístico (sem re-posicionar quando a duração muda)
-      const end = (nextStart !== Infinity) ? nextStart : (bucket.length ? bucket[bucket.length - 1].t + 4 : start + 8);
-      const anchor = { t: ln.t, el, start, end };
-
-      // mostra a faixa de acordes se a linha tem acordes, OU (só com acordes EXIBIDOS no
-      // modo edição avançada) um "gutter" editável p/ criar acordes com duplo-clique
-      const showRow = bucket.length > 0 || (advancedEdit && hasChords);
-      if (showRow) {
-        el.classList.add('has-chords');
-        const cr = makeChordRow(bucket, start, end);
-        anchor.sweepEl = cr.sweepEl;
-        anchor.headEl = cr.headEl;
-        anchor.chords = cr.chords;
-        cr.chords.forEach((cc) => { cc.el._anchor = anchor; });
-        cr.row._anchor = anchor;
-        el.appendChild(cr.row);
-        const txt = document.createElement('span');
-        txt.className = 'np-line-text';
-        txt.textContent = ln.text;
-        el.appendChild(txt);
-      } else {
-        el.textContent = ln.text;
-      }
-
-      track.appendChild(el);
-      npLyricAnchors.push(anchor);
-    });
-    box.appendChild(track);
-    npLyricCurTop = null; // recentra sem deslizar ao trocar de faixa
-    if (npOpen() && $('nowPlaying').classList.contains('lyrics-mode')) { measureLyrics(); lyricFrame(); }
-  } else if (hasChords) {
-    // INSTRUMENTAL (sem letra sincronizada): acordes em linhas próprias, agrupados de 4,
-    // espalhados pelo tempo dentro do trecho do grupo. Rola igual ao karaokê de letra.
-    const track = document.createElement('div');
-    track.className = 'np-lyrics-track';
-    track.style.transform = 'translate3d(0,0,0)';
-    npLyricTrack = track;
-
-    const sorted = chords.slice().sort((a, b) => a.t - b.t);
-    const groups = [];
-    for (let i = 0; i < sorted.length; i += 4) groups.push(sorted.slice(i, i + 4));
-
-    groups.forEach((g, gi) => {
-      const start = g[0].t;
-      const end = (gi + 1 < groups.length) ? groups[gi + 1][0].t : (g[g.length - 1].t + 4);
-      const el = document.createElement('div');
-      el.className = 'np-lyric np-chord-only';
-      const cr = makeChordRow(g, start, end);
-      el.appendChild(cr.row);
-      track.appendChild(el);
-      const ga = { t: start, el, start, end, sweepEl: cr.sweepEl, headEl: cr.headEl, chords: cr.chords };
-      cr.chords.forEach((cc) => { cc.el._anchor = ga; });
-      cr.row._anchor = ga;
-      npLyricAnchors.push(ga);
-    });
-    box.appendChild(track);
-    npLyricCurTop = null;
-    if (npOpen() && $('nowPlaying').classList.contains('lyrics-mode')) { measureLyrics(); lyricFrame(); }
-  } else if (npLyricsPlain) {
-    const el = document.createElement('div');
-    el.className = 'np-lyrics-empty';
-    el.style.whiteSpace = 'pre-wrap'; el.style.maxWidth = '720px';
-    el.style.fontSize = '17px'; el.style.lineHeight = '1.8'; el.style.fontWeight = '600';
-    el.style.color = 'rgba(255,255,255,0.85)';
-    el.textContent = npLyricsPlain;
-    box.appendChild(el);
-  } else {
-    const el = document.createElement('div');
-    el.className = 'np-lyrics-empty';
-    el.innerHTML = t('player.noLyrics');
-    box.appendChild(el);
-  }
+  if (box) renderNpLyricsLit(box);
 }
 
-// chamada em timeupdate/clique/abertura: garante um quadro imediato (mesmo pausado)
-function updateKaraoke() {
-  if (npLyricAnchors.length) lyricFrame();
-}
+// Compat: ainda chamada em timeupdate/clique/abertura. A ilha Lit tem rAF próprio
+// (MediaTimeController) → no-op (motor de scroll legado removido na Fase F).
+function updateKaraoke() {}
 
 // ---- Janela de 5 linhas com rolagem contínua sincronizada ao timestamp ----
 // A linha atual fica no centro (3ª) com opacidade máxima; as de baixo (que ainda vêm)
@@ -3515,151 +3353,9 @@ let npLyricLastTop = -1;      // última posição aplicada (evita writes quando
 let npLyricLastTs = 0;        // timestamp do último quadro (p/ dt real)
 const NP_LYRIC_SPRING_W = 10; // rigidez (rad/s): acomoda em ~0,45s sem ultrapassar
 
-// mede o centro vertical de cada linha (cache p/ evitar reflow a cada quadro)
-function measureLyrics() {
-  if (!npLyricTrack) return;
-  for (const a of npLyricAnchors) a.el._cy = a.el.offsetTop + a.el.offsetHeight / 2;
-  const box = $('npLyrics');
-  npLyricTrackTop = npLyricTrack.offsetTop;
-  npLyricMaxTop = Math.max(0, npLyricTrackTop * 2 + npLyricTrack.offsetHeight - (box ? box.clientHeight : 0));
-  npLyricCurTop = null; npLyricLastTop = -1;
-}
-
-// índice da âncora em foco: a última cujo timestamp já chegou (mantém-se fixa até a próxima)
-function activeAnchorIndex(t) {
-  const A = npLyricAnchors;
-  let i = 0;
-  for (let k = 0; k < A.length; k++) { if (A[k].t <= t + 0.02) i = k; else break; }
-  return A.length ? i : -1;
-}
-
-// um quadro: mantém a âncora atual centrada e, ao trocar de âncora, desliza rápido e
-// suave até a próxima; opacidades só são reescritas enquanto há movimento e quando mudam.
-function lyricFrame() {
-  if (!npLyricAnchors.length || !npLyricTrack) return;
-  const box = $('npLyrics');
-  if (!box) return;
-  const ch = box.clientHeight;
-  if (!ch) return;
-  const slot = ch / npLyricSlots;            // janela mostra ~5 linhas (6 com acordes)
-  const t = audio.currentTime;
-  const cy = (el) => (el._cy != null ? el._cy : el.offsetTop + el.offsetHeight / 2);
-
-  const ai = activeAnchorIndex(t);
-  const focusEl = ai >= 0 ? npLyricAnchors[ai].el : npLyricAnchors[0].el;
-  // alvo FIXO na âncora atual, limitado às bordas do conteúdo
-  const target = Math.min(npLyricMaxTop, Math.max(0, npLyricTrackTop + cy(focusEl) - ch / 2));
-
-  const now = performance.now();
-  const dt = (npLyricLastTs ? Math.min(100, now - npLyricLastTs) : 16) / 1000;
-  npLyricLastTs = now;
-  if (npLyricCurTop == null) { npLyricCurTop = target; npLyricVel = 0; }
-  // saltos enormes (seek distante): começa a 1,2 janelas do alvo p/ não virar um borrão
-  if (Math.abs(target - npLyricCurTop) > ch * 1.2) {
-    npLyricCurTop = target + Math.sign(npLyricCurTop - target) * ch * 1.2;
-    npLyricVel = 0;
-  }
-  // mola criticamente amortecida (solução analítica — exata p/ qualquer dt)
-  {
-    const w = NP_LYRIC_SPRING_W;
-    const dx = npLyricCurTop - target;
-    const B = npLyricVel + w * dx;
-    const e = Math.exp(-w * dt);
-    npLyricCurTop = target + (dx + B * dt) * e;
-    npLyricVel = (npLyricVel - w * B * dt) * e;
-  }
-  if (Math.abs(target - npLyricCurTop) < 0.3 && Math.abs(npLyricVel) < 2) {
-    npLyricCurTop = target; npLyricVel = 0;
-  }
-
-  if (npLyricCurTop !== npLyricLastTop) {
-    npLyricTrack.style.transform = `translate3d(0, ${-npLyricCurTop}px, 0)`;
-
-    const mid = npLyricCurTop + ch / 2 - npLyricTrackTop;
-    for (const a of npLyricAnchors) {
-      const el = a.el;
-      const dPx = cy(el) - mid;               // <0 acima do centro (já passou), >0 abaixo (ainda vem)
-      const sd = Math.abs(dPx) / slot;        // distância em "linhas"
-      let op = 1 - sd * 0.46;                 // centro nítido, vizinhas desbotando
-      if (dPx < -slot * 0.15) op *= 0.82;     // o que já passou fica um pouco mais apagado
-      op = Math.round(Math.max(0, Math.min(1, op)) * 100) / 100;
-      if (el._op !== op) { el._op = op; el.style.opacity = String(op); }
-    }
-    npLyricLastTop = npLyricCurTop;
-  }
-
-  // pontos do interlúdio: preenche conforme avança o intervalo, até o próximo timestamp
-  for (const a of npLyricAnchors) {
-    if (!a.dots) continue;
-    const on = ai >= 0 && npLyricAnchors[ai] === a;
-    const prog = on ? Math.min(1, Math.max(0, (t - a.g0) / Math.max(0.001, a.g1 - a.g0))) : 0;
-    a.dots.forEach((d, k) => d.classList.toggle('on', on && prog >= (k + 1) / (a.dots.length + 1)));
-  }
-
-  // acordes: na linha ATIVA, a varredura (underline) + ponto-cabeça avançam pelo tempo na
-  // BASE da linha (não cruzam o texto). Cada acorde PULSA ao ser alcançado (t=c.t) e decai
-  // de volta ao estado dim em CHORD_GLOW_DECAY — por tempo absoluto, então linhas passadas
-  // voltam ao visual de "antes de ser tocado".
-  const [ar, ag, ab] = npChordAccent; // cor de destaque (da capa) p/ os acordes
-  for (let k = 0; k < npLyricAnchors.length; k++) {
-    const a = npLyricAnchors[k];
-    if (!a.chords) continue;
-    const active = (k === ai);
-    const p = (active && a.end > a.start) ? Math.min(1, Math.max(0, (t - a.start) / (a.end - a.start))) : 0;
-    const pr = Math.round(p * 1000) / 1000;
-    if (a._sw !== pr) {
-      a._sw = pr;
-      const span = chordSpanFromFraction(pr);
-      if (a.sweepEl) a.sweepEl.style.width = active ? span : '0px';
-      if (a.headEl) a.headEl.style.left = span;
-    }
-    if (a._act !== active) {
-      a._act = active;
-      if (a.sweepEl) a.sweepEl.style.opacity = active ? '1' : '0';
-      if (a.headEl) a.headEl.style.opacity = active ? '1' : '0';
-      if (!active && a.sweepEl) a.sweepEl.style.width = '0px';
-    }
-    for (const c of a.chords) {
-      const ct = c.src.t;
-      const g = (t >= ct) ? Math.max(0, 1 - (t - ct) / CHORD_GLOW_DECAY) : 0;
-      const gr = Math.round(g * 100) / 100;
-      if (c._g !== gr) {
-        c._g = gr;
-        const el = c.el;
-        el.style.color = `rgba(${ar},${ag},${ab},${(0.72 + 0.28 * gr).toFixed(3)})`;
-        el.style.textShadow = gr > 0.02 ? `0 0 ${(12 * gr).toFixed(1)}px rgba(${ar},${ag},${ab},${(0.6 * gr).toFixed(3)})` : 'none';
-        el.style.transform = `translateX(-50%) scale(${(1 + 0.16 * gr).toFixed(3)})`;
-      }
-    }
-  }
-
-  if (focusEl !== npLastCenter) {
-    if (npLastCenter) npLastCenter.classList.remove('active');
-    focusEl.classList.add('active');
-    npLastCenter = focusEl;
-  }
-}
-
-function lyricScrollTick() {
-  npLyricScrollRAF = null;
-  if (!npOpen() || !$('nowPlaying').classList.contains('lyrics-mode') || !npLyricAnchors.length) return;
-  lyricFrame();
-  npLyricScrollRAF = requestAnimationFrame(lyricScrollTick);
-}
-function startLyricScroll() {
-  if (npLyricScrollRAF) return;
-  measureLyrics();
-  npLyricLastTs = 0; // não acumula dt do período em que o loop esteve parado
-  npLyricScrollRAF = requestAnimationFrame(lyricScrollTick);
-}
-function stopLyricScroll() {
-  if (npLyricScrollRAF) { cancelAnimationFrame(npLyricScrollRAF); npLyricScrollRAF = null; }
-}
-// liga a rolagem quando a letra sincronizada está visível na Now Playing; senão desliga
+// (des)ativa o rAF da ilha Lit conforme o karaokê fica visível/oculto.
 function syncLyricScroll() {
-  syncLitLyrics(); // ilha Lit: (des)ativa o próprio rAF nas mesmas transições
-  const on = npOpen() && $('nowPlaying').classList.contains('lyrics-mode') && npLyricAnchors.length > 0;
-  if (on) startLyricScroll(); else stopLyricScroll();
+  syncLitLyrics();
 }
 
 $('npLyricsBtn').addEventListener('click', () => {
@@ -3937,7 +3633,7 @@ document.addEventListener('keydown', (e) => {
     if (npIsFullscreen) { e.preventDefault(); toggleNpFullscreen(); return; }
     if (npOpen() && npPanelOpen()) { e.preventDefault(); hideNpPanels(); return; }
     if (npOpen() && $('nowPlaying').classList.contains('lyrics-mode')) {
-      e.preventDefault(); $('nowPlaying').classList.remove('lyrics-mode'); $('npLyricsBtn').classList.remove('active'); stopLyricScroll(); return;
+      e.preventDefault(); $('nowPlaying').classList.remove('lyrics-mode'); $('npLyricsBtn').classList.remove('active'); syncLyricScroll(); return;
     }
     if (npOpen()) { e.preventDefault(); closeNowPlaying(); return; }
     if (vis('cropModal')) { closeCropper(); return; }
@@ -3986,7 +3682,7 @@ document.addEventListener('click', (e) => {
 });
 
 // reajusta o anel do espectro ao redimensionar a janela
-window.addEventListener('resize', () => { if (npOpen()) { sizeNpViz(); if (npLyricScrollRAF) measureLyrics(); } });
+window.addEventListener('resize', () => { if (npOpen()) sizeNpViz(); });
 
 // volume inicial
 (function initVolume() {
