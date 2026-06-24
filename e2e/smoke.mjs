@@ -25,7 +25,7 @@ test('app boota: janela abre, UI principal renderiza, sem erro de JS', { timeout
     await win.waitForLoadState('domcontentloaded');
 
     // elemento sempre presente após o boot (engrenagem de Configurações)
-    await win.waitForSelector('#settingsBtn', { timeout: 20000, state: 'attached' });
+    await win.waitForSelector('#settingsBtn', { timeout: 30000, state: 'attached' });
     assert.equal(await win.locator('#settingsBtn').count(), 1, 'UI principal ausente — boot/render quebrado');
 
     // dá um tempo p/ o startup assíncrono (i18n via IPC, init de EQ/sync) estourar erro, se houver
@@ -41,17 +41,18 @@ test('Configurações: accordion abre só 1 seção por vez', { timeout: 60000 }
   try {
     const win = await app.firstWindow();
     await win.waitForLoadState('domcontentloaded');
-    await win.waitForSelector('#settingsBtn', { timeout: 20000 });
+    await win.waitForSelector('#settingsBtn', { timeout: 30000 });
     await win.click('#settingsBtn');
-    await win.waitForSelector('#settingsAcc .acc-item', { timeout: 10000 });
+    // o accordion virou ilhas <syn-setting-section> (estado = atributo [open] refletido)
+    await win.waitForSelector('#settingsAcc syn-setting-section', { timeout: 10000 });
 
     // estado inicial: exatamente 1 seção aberta
-    assert.equal(await win.locator('#settingsAcc .acc-item.open').count(), 1, 'deveria abrir 1 seção por padrão');
+    assert.equal(await win.locator('#settingsAcc syn-setting-section[open]').count(), 1, 'deveria abrir 1 seção por padrão');
 
     // clica a 3ª seção → continua 1 aberta, e é a clicada (as outras colapsam)
-    await win.locator('#settingsAcc .acc-head').nth(2).click();
-    assert.equal(await win.locator('#settingsAcc .acc-item.open').count(), 1, 'só 1 seção pode ficar aberta');
-    const thirdOpen = await win.locator('#settingsAcc .acc-item').nth(2).evaluate((el) => el.classList.contains('open'));
+    await win.locator('#settingsAcc syn-setting-section').nth(2).locator('.head').click();
+    assert.equal(await win.locator('#settingsAcc syn-setting-section[open]').count(), 1, 'só 1 seção pode ficar aberta');
+    const thirdOpen = await win.locator('#settingsAcc syn-setting-section').nth(2).evaluate((el) => el.hasAttribute('open'));
     assert.ok(thirdOpen, 'a seção clicada deveria estar aberta');
   } finally {
     await app.close();

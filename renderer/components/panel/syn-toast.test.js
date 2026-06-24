@@ -1,12 +1,12 @@
 // Teste do syn-toast (DoD §3). Conectado (arquétipo C): consome o ToastService via context.
 // Monta dentro do <syn-app-root> (provider real) e dispara toast() pelo serviço.
 import { fixture, html, expect } from '@open-wc/testing';
+// O <syn-app-root>/core-store instanciam o ApiService no eval (exige window.api do preload,
+// ausente no browser de teste). O stub PRECISA ser aplicado antes desses imports — ESM avalia
+// imports estáticos em ordem, então este vem primeiro.
+import '../test-api-stub.js';
 import '../app-root.js';
 import './index.js';
-
-// O <syn-app-root> instancia o ApiService, que exige window.api (preload). No browser de
-// teste não há preload → stub mínimo (nenhum método é chamado nestes specs de toast).
-if (!window.api) window.api = {};
 
 describe('syn-toast (conectado / arquétipo C)', () => {
   it('mostra a mensagem do ToastService com ícone de sucesso', async () => {
