@@ -14,10 +14,9 @@ import {
 import { PaletteService } from '../services/palette-service.js';
 // Store-núcleo (Fase 3): api + biblioteca + player são SINGLETONS eager (core-store.js);
 // o app-root só os re-provê via context → mesma instância que o renderer escreve.
-import { coreApi, libraryStore, playerStore } from '../services/core-store.js';
+import { coreApi, libraryStore, playerStore, devicesStore } from '../services/core-store.js';
 import { SettingsService } from '../services/settings-service.js';
 import { I18nService } from '../services/i18n-service.js';
-import { DevicesService } from '../services/devices-service.js';
 import { ToastService } from '../services/toast-service.js';
 
 export class SynAppRoot extends LitElement {
@@ -32,7 +31,7 @@ export class SynAppRoot extends LitElement {
       palette: new PaletteService(),
       settings: new SettingsService(api),
       i18n: new I18nService(api),
-      devices: new DevicesService(api),
+      devices: devicesStore,
       toast: new ToastService(),
     };
     this.services = services;

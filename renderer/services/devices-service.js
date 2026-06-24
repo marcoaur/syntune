@@ -1,5 +1,7 @@
-// DevicesService (contrato §2.1) — detecção/sync de dispositivos. ESQUELETO Fase A;
-// lógica migra na Fase C (syn-devices). Liga nos eventos device:attached/detached.
+// DevicesService (store-núcleo, ARCHITECTURE-V2 §store) — estado de sync de dispositivos.
+// Fonte única de `activeDevice` (dispositivo conectado c/ sync) e `syncedKeys` (Set das
+// keys sincronizadas no dispositivo de referência). Consumido por biblioteca (badges de
+// sync) e pela view de devices. Liga nos eventos device:attached/detached via renderer.
 import { StoreService } from './store-service.js';
 
 export class DevicesService extends StoreService {
@@ -7,8 +9,10 @@ export class DevicesService extends StoreService {
   constructor(api) {
     super();
     this.api = api;
-    /** @type {object[]} */ this.devices = [];
-    /** @type {object|null} */ this.active = null;
+    /** @type {object|null} */ this.activeDevice = null;
+    /** @type {Set<string>} */ this.syncedKeys = new Set();
   }
-  async list() { this.devices = (await this.api.raw.devicesList()) || []; this.emitChange(); return this.devices; }
+  setActiveDevice(d) { this.set('activeDevice', d || null); }
+  /** Aceita Set ou array de keys → normaliza p/ Set. */
+  setSyncedKeys(keys) { this.set('syncedKeys', keys instanceof Set ? keys : new Set(keys || [])); }
 }

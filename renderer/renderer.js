@@ -16,7 +16,7 @@ import { loading, palette, menu, confirm as confirmCap } from './components/capa
 // Store-núcleo (ARCHITECTURE-V2 Fase 3): fonte única do estado central. Por ora só a
 // biblioteca (`songs`); o renderer escreve via libraryStore.setSongs e mantém o global
 // `songs` como ESPELHO (subscribe abaixo) — leitores migram pro store aos poucos.
-import { libraryStore, playlistsStore, playerStore } from './services/core-store.js';
+import { libraryStore, playlistsStore, playerStore, devicesStore } from './services/core-store.js';
 
 // Substitui o confirm() nativo (síncrono/bloqueante) pela capacidade <syn-confirm> (async).
 function askConfirm(message, opts = {}) {
@@ -62,8 +62,11 @@ libraryStore.subscribe('songs', (items) => { songs = items; });
 let pendingJobs = [];    // downloads/enriquecimentos em andamento (transientes)
 
 // Sincronização com dispositivo
+// ESPELHOS de devicesStore (fonte única; ver core-store.js). Escrita via devicesStore.setX.
 let activeDevice = null;        // { serial, ... } dispositivo conectado + sync ligada
 let syncedKeys = new Set();     // keys (nome|artista|ano) sincronizadas no dispositivo de referência
+devicesStore.subscribe('activeDevice', (d) => { activeDevice = d; });
+devicesStore.subscribe('syncedKeys', (s) => { syncedKeys = s; });
 let hasSyncContext = false;     // há um dispositivo de referência p/ exibir badges de sync?
 let deviceOnlySongs = [];       // faixas que só existem no dispositivo (entram na lista)
 let showingIgnored = false;     // sheet de dispositivos: lista de ignorados visível?
@@ -796,7 +799,7 @@ $('ppSync').addEventListener('click', async () => {
   const res = await window.api.playlistSyncToDevice({ serial: activeDevice.serial, name: p.name, tracks: p.tracks });
   hideScanIndicator();
   if (res && res.error) { toast(res.error, 'error'); return; }
-  try { const st = await window.api.deviceSyncState(activeDevice.serial); syncedKeys = new Set(st.keys || []); renderList(); } catch { /* ok */ }
+  try { const st = await window.api.deviceSyncState(activeDevice.serial); devicesStore.setSyncedKeys(st.keys || []); renderList(); } catch { /* ok */ }
   toast(t('playlists.syncResult', {
     count: res.count,
     copied: res.copied ? t('playlists.syncCopied', { n: res.copied }) : ''
@@ -1964,7 +1967,7 @@ async function executeDelete(where) {
   if (where === 'device' || where === 'both') {
     if (s.deviceOnly) deviceOnlySongs = deviceOnlySongs.filter((x) => x.filePath !== s.filePath);
     if (activeDevice) {
-      try { const st = await window.api.deviceSyncState(activeDevice.serial); syncedKeys = new Set(st.keys || []); } catch { /* ok */ }
+      try { const st = await window.api.deviceSyncState(activeDevice.serial); devicesStore.setSyncedKeys(st.keys || []); } catch { /* ok */ }
     }
   }
   await reloadLibrary();
@@ -3692,7 +3695,7 @@ window.api.onDeviceAttached(async (info) => {
 
 window.api.onDeviceDetached((info) => {
   if (activeDevice && activeDevice.serial === info.serial) {
-    activeDevice = null;
+    devicesStore.setActiveDevice(null);
     deviceOnlySongs = [];
     // mantém os badges com o último estado conhecido (sync.json)
     renderList();
@@ -3724,12 +3727,12 @@ async function runScanAndSync(info) {
   if (syncBusy) { syncQueued = info; return; } // já há uma sincronização em curso
   syncBusy = true;
   setDevicesBusy(true);
-  activeDevice = { serial: info.serial, nickname: info.nickname, label: info.label };
+  devicesStore.setActiveDevice({ serial: info.serial, nickname: info.nickname, label: info.label });
   showScanIndicator(t('sync.scanning'));
   try {
     const scan = await window.api.deviceScan(info.serial);
     if (scan && scan.error) { toast(scan.error, 'error'); return; }
-    if (Array.isArray(scan.syncedKeys)) syncedKeys = new Set(scan.syncedKeys);
+    if (Array.isArray(scan.syncedKeys)) devicesStore.setSyncedKeys(scan.syncedKeys);
     hasSyncContext = true;
     deviceOnlySongs = scan.deviceOnly || [];
     deviceStats[info.serial] = { pendingCount: scan.pendingCount, pendingBytes: scan.pendingBytes || 0 };
@@ -3741,7 +3744,7 @@ async function runScanAndSync(info) {
     if (res && res.error) { toast(res.error, 'error'); return; }
     if (res && res.queued) return; // outra sincronização assumiu; sem toast
 
-    if (Array.isArray(res.syncedKeys)) syncedKeys = new Set(res.syncedKeys);
+    if (Array.isArray(res.syncedKeys)) devicesStore.setSyncedKeys(res.syncedKeys);
     deviceStats[info.serial] = { pendingCount: res.failed || 0, pendingBytes: 0 };
     paintCapacityRow(info.serial);
     renderList();
@@ -3816,7 +3819,7 @@ function wireDeviceIntents() {
     await window.api.devicesUpdate({ serial, syncEnabled: enabled });
     await renderDevices();
     if (enabled && connected) runScanAndSync({ serial, nickname, label, configured: true, syncEnabled: true });
-    else if (!enabled && activeDevice && activeDevice.serial === serial) { activeDevice = null; deviceOnlySongs = []; renderList(); }
+    else if (!enabled && activeDevice && activeDevice.serial === serial) { devicesStore.setActiveDevice(null); deviceOnlySongs = []; renderList(); }
   });
   modal.addEventListener('syn:device:scope', (e) => { persistScope(e.detail.serial, e.detail.scope); refreshDeviceStats(e.detail.serial); });
   modal.addEventListener('syn:device:ignore', async (e) => { await window.api.devicesUpdate({ serial: e.detail.serial, ignored: e.detail.ignored }); await renderDevices(); });
@@ -3863,9 +3866,9 @@ async function initSyncContext() {
       devices.find((d) => d.configured) || null;
     if (!ref) return;
     const st = await window.api.deviceSyncState(ref.serial);
-    syncedKeys = new Set((st && st.keys) || []);
+    devicesStore.setSyncedKeys((st && st.keys) || []);
     hasSyncContext = true;
-    if (ref.connected) activeDevice = { serial: ref.serial, nickname: ref.nickname, label: ref.label };
+    if (ref.connected) devicesStore.setActiveDevice({ serial: ref.serial, nickname: ref.nickname, label: ref.label });
     renderList();
   } catch { /* sem contexto */ }
 }
