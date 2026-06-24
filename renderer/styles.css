@@ -767,6 +767,97 @@ img { -webkit-user-drag: none; user-drag: none; }
 /* separador sutil entre seções do form */
 .editor-edit .form-grid { gap: 12px; }
 
+/* ============================================================
+   REDESIGN da ilha syn-track-editor (Fase E)
+   - Letra = carro-chefe: painel logo após o hero, com CTA de status,
+     teaser da letra e FADE no rodapé (impressão de continuidade).
+   - Edição = DRAWER sobreposto (bottom sheet) sobre o palco imersivo.
+   Regras escopadas em .te-* p/ não tocar no markup legado de index.html.
+   ============================================================ */
+
+/* ---- Letra: painel carro-chefe ---- */
+.te-lyrics-panel.ev-lyrics {            /* anula o .ev-lyrics base (margin/borda) */
+  margin: 6px 0 26px; padding: 0; border-top: none;
+}
+.te-lyrics-cta {                        /* o card de status vira o header clicável */
+  width: 100%; box-sizing: border-box;
+  background: linear-gradient(135deg, rgba(var(--cv), 0.20), rgba(var(--cv), 0.06));
+  border: 1px solid rgba(var(--cv), 0.28);
+  -webkit-backdrop-filter: blur(16px) saturate(1.2);
+  backdrop-filter: blur(16px) saturate(1.2);
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.1), 0 6px 22px rgba(0, 0, 0, 0.22);
+  color: #fff;
+}
+.te-lyrics-cta:hover {
+  border-color: rgba(var(--cv), 0.5);
+  background: linear-gradient(135deg, rgba(var(--cv), 0.26), rgba(var(--cv), 0.10));
+}
+.te-lyrics-cta .lsc-title { color: #fff; font-weight: 750; }
+.te-lyrics-cta .lsc-sub { color: rgba(255, 255, 255, 0.55); }
+.te-lyrics-cta .lsc-arrow { color: rgba(255, 255, 255, 0.4); }
+.te-lyrics-cta:hover .lsc-arrow { color: #fff; }
+.te-lyrics-cta .ev-lyrics-badge { margin-left: auto; }   /* badge antes do chevron */
+
+/* corpo: teaser da letra com máscara de fade no rodapé */
+.te-lyrics-body { position: relative; margin-top: 12px; }
+.te-lyrics-body:empty { display: none; }
+.te-lyrics-teaser {
+  margin: 0; max-height: 184px; overflow: hidden;
+  font-size: 14px; line-height: 1.75; opacity: 0.9; white-space: pre-wrap;
+  padding: 2px 4px 0;
+  -webkit-mask-image: linear-gradient(180deg, #000 58%, transparent 100%);
+  mask-image: linear-gradient(180deg, #000 58%, transparent 100%);
+}
+.te-lyrics-teaser:empty { display: none; }
+/* gradiente extra no rodapé (reforça o fade e funciona sem suporte a mask) */
+.te-lyrics-fade {
+  position: absolute; left: 0; right: 0; bottom: 0; height: 64px;
+  pointer-events: none;
+  background: linear-gradient(180deg, transparent, rgba(var(--cv), 0.08) 70%, rgba(8, 8, 12, 0.22));
+}
+.te-lyrics-teaser:empty + .te-lyrics-fade { display: none; }
+
+/* ---- Edição: drawer sobreposto (bottom sheet) ---- */
+/* palco fica inerte e escurecido atrás do drawer.
+   Só brightness (barato de animar) — NADA de blur: filtro de blur na view inteira
+   animando junto com o slide = engasgo. */
+.editor.edit-mode #editorView.te-view {
+  display: block; filter: brightness(0.45); pointer-events: none;
+  transition: filter 0.3s var(--ease);
+}
+/* drawer sempre montado (translate controla a visibilidade → anima nos dois sentidos) */
+.editor.view-mode #editorEdit.te-drawer,
+.editor.edit-mode #editorEdit.te-drawer { display: block; }
+.te-drawer {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  max-width: none; margin: 0; max-height: 88%;
+  overflow-y: auto; z-index: 6;
+  background: rgba(18, 18, 24, 0.975);  /* quase opaco: dispensa backdrop-filter (que engasga ao transladar) */
+  border-top: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 22px 22px 0 0;
+  box-shadow: 0 -24px 70px rgba(0, 0, 0, 0.55);
+  transform: translateY(101%);
+  transition: transform 0.34s var(--ease);
+  will-change: transform;               /* promove a camada → slide na GPU */
+  animation: none;                      /* sobrescreve o npPop herdado */
+}
+.editor.edit-mode #editorEdit.te-drawer { transform: translateY(0); }
+/* NENHUM backdrop-filter dentro do drawer: cada input/capa/cta com blur próprio
+   recomputaria o backdrop por frame ao transladar → stutter. O fundo do drawer já
+   é quase opaco, então o vidro fosco dos filhos é dispensável. */
+.te-drawer .input,
+.te-drawer .cover-preview,
+.te-drawer .lyrics-status-card {
+  -webkit-backdrop-filter: none; backdrop-filter: none;
+}
+.te-drawer .editor-body { max-width: 620px; margin: 0 auto; padding: 8px 26px 32px; }
+/* alça do drawer no topo */
+.te-drawer .editor-body::before {
+  content: ''; display: block;
+  width: 40px; height: 4px; margin: 6px auto 18px;
+  border-radius: 2px; background: rgba(255, 255, 255, 0.28);
+}
+
 /* ---------- Editor (formulário) ---------- */
 .top-row { display: flex; gap: 18px; margin-bottom: 14px; align-items: flex-start; }
 .cover-col { display: flex; flex-direction: column; gap: 8px; width: 152px; flex-shrink: 0; }

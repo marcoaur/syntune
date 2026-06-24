@@ -23,7 +23,25 @@
 const fs = require('fs');
 const path = require('path');
 
-const LOCALES_DIR = path.join(__dirname, 'locales');
+// Resolve a pasta locales/ valendo nos três contextos que carregam este módulo:
+//  - `electron .` e CLI (stune): rodam da raiz → __dirname/locales.
+//  - electron-vite: este módulo é bundlado no main (out/main) → __dirname/locales
+//    não existe; ancoramos em app.getAppPath() (raiz do projeto em dev, raiz do asar
+//    empacotado). require('electron') fora do Electron (CLI) devolve um caminho/erro
+//    sem .app → o try/catch cai no fallback por __dirname. Sem dependência rígida de
+//    electron, o CLI continua funcionando.
+function resolveLocalesDir() {
+  try {
+    const appRoot = require('electron').app.getAppPath();
+    if (appRoot) {
+      const p = path.join(appRoot, 'locales');
+      if (fs.existsSync(p)) return p;
+    }
+  } catch { /* não-Electron (CLI): usa __dirname */ }
+  return path.join(__dirname, 'locales');
+}
+
+const LOCALES_DIR = resolveLocalesDir();
 const DEFAULT_LANG = 'en';
 
 let currentLang = DEFAULT_LANG;

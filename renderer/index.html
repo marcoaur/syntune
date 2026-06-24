@@ -239,6 +239,8 @@
       </div>
     </div>
   </div>
+  <!-- Controller da tela cheia imersiva (owns #nowPlaying por id) -->
+  <syn-now-playing></syn-now-playing>
 
   <!-- Equalizador (6 bandas, tempo real) -->
   <div id="eqPanel" class="eq-panel hidden">
@@ -483,6 +485,23 @@
     </div>
   </div>
 
+  <!-- Editor de detalhes (cola; owns #editorBackdrop/#cropModal/#lyricsModal por id) -->
+  <syn-editor></syn-editor>
+
+  <!-- Áudio: grafo Web Audio + EQ (headless + owns #eqPanel por id) -->
+  <syn-audio></syn-audio>
+
+  <!-- Fila de reprodução (controller; owns #queuePanel por id) -->
+  <syn-queue></syn-queue>
+
+  <!-- Biblioteca: lista/busca/agrupar/artista (controller; owns #songList/#artistPage por id) -->
+  <syn-library></syn-library>
+
+  <!-- Adicionar música + motor de downloads (controller; owns #addBar por id) -->
+  <syn-add></syn-add>
+
+  <!-- ========== Playlists (view inteligente: grade + página) ========== -->
+  <syn-playlists>
   <!-- ========== Playlists (grade) ========== -->
   <div id="playlistsView" class="artist-page pl-view hidden">
     <div class="ap-ambient"></div>
@@ -540,9 +559,10 @@
       <div id="ppEmpty" class="pl-empty hidden" data-i18n-html="playlists.emptyPage">Playlist vazia. Adicione faixas pelo menu (⋯) de uma música.</div>
     </div>
   </div>
+  </syn-playlists>
 
   <!-- Sheet de configurações -->
-  <div id="settingsModal" class="sheet-backdrop hidden">
+  <syn-settings id="settingsModal" class="sheet-backdrop hidden">
     <div class="sheet">
       <h2 data-i18n="settings.title">Configurações</h2>
 
@@ -684,10 +704,10 @@
       </div>
       <p class="app-version" id="appVersion"></p>
     </div>
-  </div>
+  </syn-settings>
 
   <!-- Central de dispositivos (vidro imersivo) -->
-  <div id="devicesModal" class="sheet-backdrop devices-backdrop hidden">
+  <syn-devices id="devicesModal" class="sheet-backdrop devices-backdrop hidden">
     <div class="sheet devices-sheet">
       <div class="dv-head">
         <div class="dv-head-text">
@@ -703,7 +723,7 @@
       <button id="toggleIgnored" class="ignored-toggle hidden" data-i18n="devices.showIgnored">Mostrar ignorados</button>
       <div id="ignoredList" class="device-list ignored hidden"></div>
     </div>
-  </div>
+  </syn-devices>
 
   <!-- Modal de exclusão (dispositivo / PC / ambos, com confirmação em 2 cliques) -->
   <div id="deleteModal" class="sheet-backdrop hidden">
@@ -815,86 +835,7 @@
   </div>
 
 
-  <!-- ========== Editor Imersivo de Letras Sincronizadas ========== -->
-  <div id="lyricsEditorModal" class="le-modal hidden">
-    <div class="le-ambient" id="leAmbient"></div>
-
-    <!-- Barra de topo -->
-    <header class="le-header">
-      <button id="leBackBtn" class="le-icon-btn" title="Voltar" data-i18n-title="common.back">
-        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
-      </button>
-      <div class="le-header-info">
-        <div id="leTitle" class="le-h-title"></div>
-        <div id="leArtist" class="le-h-artist"></div>
-      </div>
-      <div class="le-header-actions">
-        <button id="leModeBtn" class="le-icon-btn le-mode-btn" type="button" title="Editar acordes" data-i18n-title="chords.editor.modeLyrics"></button>
-        <button id="leSpeedBtn" class="le-icon-btn le-speed-btn" title="Velocidade de reprodução (Alt+S)" data-i18n-title="lyrics.editor.speed">1x</button>
-
-        <!-- Menu de ferramentas (overflow) -->
-        <div class="le-menu-wrap">
-          <button id="leMenuBtn" class="le-icon-btn" title="Ferramentas da letra" data-i18n-title="lyrics.editor.tools" aria-haspopup="true" aria-expanded="false">
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>
-          </button>
-          <div id="leMenu" class="le-menu hidden" role="menu">
-            <div class="le-menu-label" data-i18n="lyrics.editor.shiftAll">Deslocar todos os tempos</div>
-            <div class="le-menu-shift">
-              <button id="leOffMinus" class="le-tool-btn" type="button" title="Adiantar todos os tempos em 100ms" data-i18n-title="lyrics.editor.shiftMinus">−100ms</button>
-              <button id="leOffPlus" class="le-tool-btn" type="button" title="Atrasar todos os tempos em 100ms" data-i18n-title="lyrics.editor.shiftPlus">+100ms</button>
-            </div>
-            <button id="leClearTimes" class="le-menu-item le-menu-item--danger" type="button" role="menuitem">
-              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg>
-              <span data-i18n="lyrics.editor.clearTimes">Limpar todos os tempos</span>
-            </button>
-            <div class="le-menu-sep"></div>
-            <div class="le-menu-info"><strong id="leLineCount">0</strong> <span data-i18n="lyrics.editor.linesLabel">versos com texto</span></div>
-            <div class="le-menu-hint">
-              <span data-i18n-html="lyrics.editor.hintMark"><kbd>Enter</kbd> marca o tempo</span>
-              <span data-i18n-html="lyrics.editor.hintAdjust"><kbd>Alt</kbd>+<kbd>↑↓</kbd> ajusta ±0,1s</span>
-              <span data-i18n-html="lyrics.editor.hintReplay"><kbd>Alt</kbd>+<kbd>R</kbd> reouve a linha</span>
-              <span data-i18n-html="lyrics.editor.hintUndo"><kbd>Ctrl</kbd>+<kbd>Z</kbd> desfaz</span>
-              <span data-i18n="lyrics.editor.hintClickNum">clique no nº ouve a linha</span>
-            </div>
-          </div>
-        </div>
-
-        <button id="leDiscardBtn" class="le-btn le-btn-ghost" data-i18n="common.discard">Descartar</button>
-        <button id="leSaveBtn" class="le-btn le-btn-primary">
-          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
-          <span data-i18n="lyrics.editor.save">Salvar Localmente</span>
-        </button>
-      </div>
-    </header>
-
-    <!-- Mini barra de progresso (busca + marcadores das linhas) -->
-    <div id="leProgress" class="le-progress" title="Clique para buscar" data-i18n-title="lyrics.editor.seekHint">
-      <div id="leProgressTicks" class="le-progress-ticks"></div>
-      <div id="leProgressFill" class="le-progress-fill"></div>
-      <div id="leProgressHead" class="le-progress-head"></div>
-    </div>
-
-    <!-- Corpo do editor -->
-    <div class="le-content">
-      <!-- Coluna de timestamps (header) -->
-      <div class="le-grid-header">
-        <span class="le-col-time-h" data-i18n="lyrics.editor.colTime">Tempo</span>
-        <span class="le-col-text-h" data-i18n="lyrics.editor.colText">Trecho da Letra</span>
-      </div>
-      <div id="leLines" class="le-grid">
-        <!-- linhas injetadas via JS -->
-      </div>
-    </div>
-
-  </div>
-
-  <!-- Overlay de carregamento -->
-  <div id="loadingOverlay" class="loading-overlay hidden">
-    <div class="loading-card">
-      <div class="spinner"></div>
-      <div id="loadingMsg" class="loading-msg" data-i18n="common.loading">Carregando…</div>
-    </div>
-  </div>
+  <!-- Overlay de carregamento = capacidade <syn-loading> (montada no body via capabilities.js) -->
 
   <div id="toast" class="toast hidden"></div>
 

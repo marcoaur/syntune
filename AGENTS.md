@@ -19,7 +19,7 @@ Diferencial: pipeline de metadados **factual-first** (a IA nunca inventa sozinha
 | Camada | Tecnologia |
 |--------|-----------|
 | Runtime | **Electron 31** (main + preload + renderer) |
-| Sem bundler | renderer carregado como `<script>` clássico (`renderer/index.html` → `renderer.js`) |
+| Renderer | bundlado via **electron-vite** (Vite 7); UI em ilhas **Lit 3** (`renderer/components/`) compostas por `renderer.js` (orquestrador + IPC). App roda SEMPRE bundlado (`npm start`/`dev`/empacotado) — sem fallback legado (Fase F) |
 | Tags MP3 | `node-id3` |
 | Download | `yt-dlp-wrap` + ffmpeg (binários baixados ao 1º uso em `userData`) |
 | Update | `electron-updater` (GitHub Releases, só no build NSIS) |
@@ -28,7 +28,7 @@ Diferencial: pipeline de metadados **factual-first** (a IA nunca inventa sozinha
 | i18n | módulo próprio `i18n.js` + `locales/{en,pt}.json` |
 | Cripto | `crypto` (AES-256-GCM) + `safeStorage` (DPAPI/Keychain/Secret Service) |
 
-**Regra de dependências:** projeto sem bundler. **Não** adicionar libs novas no renderer; usar APIs nativas modernas (ESM nativo, `fetch`, `URLSearchParams`, `CSS.escape`, etc.). No main process, libs Node/Electron OK se justificadas.
+**Regra de dependências:** renderer bundlado (electron-vite). UI nova = web component **Lit** (`renderer/components/`, padrões em `_patterns/`); fora disso, preferir APIs nativas modernas (`fetch`, `URLSearchParams`, `CSS.escape`, etc.). Evitar libs novas no renderer sem justificativa; `lit`/`@lit/context` são devDependencies (inlinadas no bundle). No main process, libs Node/Electron OK se justificadas. Main/preload seguem **não-bundlados** na raiz (só o renderer é bundlado).
 
 ## 3. Taxonomia de badges (cabeçalho de cada arquivo)
 

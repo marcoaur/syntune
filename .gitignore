@@ -5,6 +5,9 @@ node_modules/
 # nas Releases do GitHub, nunca commitados no repositório
 dist/
 
+# Saída do electron-vite (bundle dev/preview) — reproduzível via `npm run build:vite`
+out/
+
 # Logs e lixo de sistema operacional
 *.log
 npm-debug.log*
