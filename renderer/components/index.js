@@ -22,6 +22,7 @@ export { SynDevice } from './device/syn-device.js';
 export { SynDevices } from './device/syn-devices.js';
 export { SynAdd } from './add/syn-add.js';
 export { SynLibrary } from './library/syn-library.js';
+export { SynEditor } from './editor/syn-editor.js';
 export { SynPlaylistCard } from './playlist/syn-playlist-card.js';
 export { SynPlaylists } from './playlist/syn-playlists.js';
 export { SynSongCard } from './song/syn-song-card.js';
