@@ -63,14 +63,6 @@ function applyStaticI18n() {
 // activeDevice/syncedKeys vivem em devicesStore (fonte única; core-store.js).
 // Leitura: devicesStore.activeDevice / devicesStore.syncedKeys; escrita via setX.
 
-// Busca / agrupamento
-let searchQuery = '';
-let groupBy = false;                  // agrupar por artista (com subcabeçalho de álbum)
-let collapsedArtists = new Set();     // artistas com a seção recolhida
-// cascata de entrada dos cards: só em mudanças intencionais de visão (carga
-// inicial, busca, agrupamento). Re-renders de fundo (sync de dispositivo,
-// jobs) não devem "piscar" a lista re-animando tudo.
-let listEntrance = true;
 
 // Player
 let queue = [];                 // fila de reprodução atual
@@ -238,15 +230,6 @@ function flareAmbient() {
 }
 
 // ====================== Biblioteca: carregar e renderizar ======================
-function sortSongs(list) {
-  const k = (s, f) => (s[f] || '').toString().toLowerCase();
-  return list.slice().sort((a, b) =>
-    k(a, 'artist').localeCompare(k(b, 'artist'), t('meta.locale')) ||
-    (a.year || '').localeCompare(b.year || '', t('meta.locale')) ||
-    k(a, 'album').localeCompare(k(b, 'album'), t('meta.locale')) ||
-    k(a, 'title').localeCompare(k(b, 'title'), t('meta.locale'))
-  );
-}
 
 async function reloadLibrary() {
   try {
@@ -261,7 +244,7 @@ async function reloadLibrary() {
     console.warn('[reloadLibrary]', err.message || err);
     libraryStore.setSongs([]);
   }
-  renderList();
+  if (synLibrary) synLibrary.refresh();
 }
 
 function songSubtitle(s) {
@@ -271,64 +254,12 @@ function songSubtitle(s) {
   return parts.join(' · ') || t('library.noInfo');
 }
 
-// normaliza p/ busca: minúsculas e sem acentos (bom p/ português)
-// casa todos os termos (AND) em título + artista + álbum
-function matchesQuery(s, terms) {
-  if (!terms.length) return true;
-  const hay = normalizeText(`${s.title || ''} ${s.artist || ''} ${s.album || ''}`);
-  return terms.every((t) => hay.includes(t));
-}
-function artistKeyOf(s) { return (s.artist || '').trim() || t('library.noArtist'); }
 
 // Faixa de demonstração semeada (artista "Syntune" + álbum "Demo") — contrato com o
 // asset em assets/demo/. Ao clicá-la, o app abre direto no modo imersivo + karaokê
 // (o "primeiro uau"). Some quando o usuário a substitui/apaga.
 function isDemoTrack(s) { return !!s && s.artist === 'Syntune' && s.album === 'Demo'; }
 
-function renderList() {
-  const list = $('songList');
-  list.innerHTML = '';
-  // consome o "ticket" de animação: sem ele, os cards entram estáticos
-  list.classList.toggle('no-entrance', !listEntrance);
-  listEntrance = false;
-
-  // jobs em andamento (downloads) aparecem no topo — fornecidos pela ilha syn-add
-  if (synAdd) for (const c of synAdd.pendingCards()) list.appendChild(c);
-
-  // músicas da biblioteca + faixas que só existem no dispositivo, filtradas pela busca
-  const all = libraryStore.songs.concat(devicesStore.deviceOnlySongs);
-  const terms = normalizeText(searchQuery).split(/\s+/).filter(Boolean);
-  const filtered = terms.length ? all.filter((s) => matchesQuery(s, terms)) : all;
-  const sorted = sortSongs(filtered);
-  playerStore.visibleList = sorted; // base da fila de reprodução (na ordem exibida)
-
-  if (groupBy) renderGenreShelves(list, sorted);
-  else {
-    // cascata de entrada: cada card chega com um pequeno atraso escalonado
-    let i = 0;
-    for (const s of sorted) {
-      const card = buildSongCard(s);
-      card.style.setProperty('--i', String(Math.min(i++, 24)));
-      list.appendChild(card);
-    }
-  }
-
-  // busca/agrupar só fazem sentido com biblioteca; o adicionar fica sempre disponível
-  const hasLib = all.length > 0;
-  $('searchBox').classList.toggle('hidden', !hasLib);
-  $('groupToggle').classList.toggle('hidden', !hasLib);
-  const empty = !(synAdd && synAdd.hasPending()) && all.length === 0;
-  const noResults = all.length > 0 && sorted.length === 0;
-  $('emptyState').classList.toggle('hidden', !empty);
-  $('noResults').classList.toggle('hidden', !noResults);
-
-  refreshToolbarStatus();
-
-  // remonta o visualizador no card que está tocando (cards foram recriados)
-  markPlayingCards();
-}
-
-// iniciais do artista para o avatar (placeholder)
 
 const globalPlaycountCache = {};   // artist + "-" + title -> { playcount, listeners, tags } | null
 const globalPlaycountPending = {}; // artist + "-" + title -> Promise
@@ -372,228 +303,6 @@ async function fetchGlobalPlaycount(artist, title) {
   return globalPlaycountPending[k];
 }
 
-// busca a foto do artista (Genius) de forma lazy, com cache em memória + dedupe
-const artistImgCache = {};   // normArtist -> URL mp3artist:// (string curta) | null
-const artistImgPending = {}; // normArtist -> Promise
-async function fillArtistAvatar(el, name) {
-  const k = normPart(name);
-  if (!k) return;
-  const apply = (url) => { if (url) el.innerHTML = `<img src="${url}" alt="" />`; };
-  if (artistImgCache[k] !== undefined) { apply(artistImgCache[k]); return; }
-  if (!artistImgPending[k]) {
-    artistImgPending[k] = window.api.artistImage({ name })
-      .then((r) => { artistImgCache[k] = (r && (r.url || r.dataUrl)) || null; return artistImgCache[k]; })
-      .catch(() => { artistImgCache[k] = null; return null; })
-      .finally(() => { delete artistImgPending[k]; });
-  }
-  apply(await artistImgPending[k]);
-}
-
-// visão agrupada: carrosséis horizontais por GÊNERO, cada um com cards de ARTISTA
-function renderGenreShelves(list, sorted) {
-  const OTHERS = t('library.others');
-  const genres = new Map(); // gênero -> { display, artists: Map(artistKey -> {display, songs[]}) }
-  for (const s of sorted) {
-    const gk = (s.genre || '').trim() || OTHERS;
-    let g = genres.get(gk);
-    if (!g) { g = { display: gk, artists: new Map() }; genres.set(gk, g); }
-    const ak = artistKeyOf(s);
-    let a = g.artists.get(ak);
-    if (!a) { a = { display: s.artist || t('library.noArtist'), songs: [] }; g.artists.set(ak, a); }
-    a.songs.push(s);
-  }
-
-  // gêneros: mais artistas primeiro; "Outros" por último
-  const shelves = [...genres.values()].sort((x, y) => {
-    if (x.display === OTHERS) return 1;
-    if (y.display === OTHERS) return -1;
-    return y.artists.size - x.artists.size || x.display.localeCompare(y.display, t('meta.locale'));
-  });
-
-  let gi = 0;
-  for (const g of shelves) {
-    const shelf = document.createElement('div');
-    shelf.className = 'genre-shelf';
-    shelf.style.setProperty('--i', String(Math.min(gi++, 6)));
-
-    const head = document.createElement('div');
-    head.className = 'genre-head';
-    // (não usar "t" como nome aqui: sombrearia a função de tradução t())
-    const gTitle = document.createElement('div'); gTitle.className = 'genre-title'; gTitle.textContent = g.display;
-    const c = document.createElement('div'); c.className = 'genre-count';
-    c.textContent = tn('count.artist', g.artists.size);
-    head.append(gTitle, c);
-    shelf.appendChild(head);
-
-    const car = document.createElement('div');
-    car.className = 'carousel';
-    const artists = [...g.artists.values()].sort((a, b) => a.display.localeCompare(b.display, t('meta.locale')));
-    let ai = 0;
-    for (const a of artists) {
-      const ac = buildArtistCard(a);
-      ac.style.setProperty('--i', String(Math.min(ai++, 12)));
-      car.appendChild(ac);
-    }
-    // roda vertical do mouse → rolagem horizontal do carrossel
-    car.addEventListener('wheel', (e) => {
-      if (!e.deltaY) return;
-      const before = car.scrollLeft;
-      car.scrollLeft += e.deltaY;
-      if (car.scrollLeft !== before) e.preventDefault();
-    }, { passive: false });
-
-    shelf.appendChild(car);
-    list.appendChild(shelf);
-  }
-}
-
-function buildArtistCard(a) {
-  const card = document.createElement('div');
-  card.className = 'artist-card';
-
-  const photo = document.createElement('div');
-  photo.className = 'a-photo';
-  const inner = document.createElement('div');
-  inner.className = 'a-photo-inner';
-  inner.textContent = artistInitials(a.display);
-  const play = document.createElement('button');
-  play.className = 'a-play';
-  play.title = t('common.play');
-  play.innerHTML = ICONS.play;
-  play.addEventListener('click', (e) => {
-    e.stopPropagation();
-    spawnPlayBurst(card);
-    playList(sortSongs(a.songs));
-  });
-  photo.append(inner, play);
-  // foto + paleta: o halo do hover usa a cor dominante da foto do artista
-  fillArtistAvatar(inner, a.display).then(async () => {
-    const dataUrl = artistImgCache[normPart(a.display)];
-    if (!dataUrl) return;
-    const pal = await getPalette(dataUrl);
-    if (pal) card.style.setProperty('--cv', `${pal.r}, ${pal.g}, ${pal.b}`);
-  });
-
-  const name = document.createElement('div');
-  name.className = 'a-name';
-  name.textContent = a.display;
-  const sub = document.createElement('div');
-  sub.className = 'a-sub';
-  sub.textContent = tn('count.song', a.songs.length);
-
-  card.append(photo, name, sub);
-  card.addEventListener('click', () => openArtistPage(a));
-  return card;
-}
-
-// ---- Página do artista (imersiva) ----
-let artistPageSongs = [];
-function openArtistPage(a) {
-  const sorted = sortSongs(a.songs);
-  artistPageSongs = sorted;
-  $('apName').textContent = a.display;
-
-  const albums = new Set(sorted.map((s) => normalizeText(s.album || '')).filter(Boolean));
-  const nS = sorted.length, nA = albums.size;
-  $('apStats').textContent = tn('count.song', nS) +
-    (nA ? ` · ${tn('count.album', nA)}` : '');
-
-  const photo = $('apPhoto');
-  photo.innerHTML = `<span class="ap-initials">${artistInitials(a.display)}</span>`;
-  $('artistPage').style.setProperty('--cv', '124, 92, 255'); // ambiente padrão
-
-  renderArtistTracks($('apTracks'), sorted);
-  $('artistPage').classList.remove('hidden', 'closing');
-  $('apTracks').parentElement.scrollTop = 0; // rola para o topo
-
-  // Limpa estado anterior das stats
-  $('apLastfmInfo').classList.add('hidden');
-  $('apListeners').textContent = '—';
-  $('apPlaycount').textContent = '—';
-  $('apGlobalTags').innerHTML = '';
-  $('apTagsCard').classList.add('hidden');
-  $('apBio').innerHTML = '';
-  $('apBioCard').classList.add('hidden');
-
-  // foto do artista + cor ambiente carregam em segundo plano
-  fillArtistAvatar(photo, a.display).then(async () => {
-    const dataUrl = artistImgCache[normPart(a.display)];
-    if (dataUrl) {
-      const pal = await getPalette(dataUrl);
-      if (pal) $('artistPage').style.setProperty('--cv', `${pal.r}, ${pal.g}, ${pal.b}`);
-    }
-  });
-
-  // Fetch Last.fm info (Bio, Stats, Tags)
-  window.api.lastfmGetArtistInfo({ artist: a.display }).then(res => {
-    if (res && window.getComputedStyle($('artistPage')).display !== 'none' && $('apName').textContent === a.display) {
-      $('apLastfmInfo').classList.remove('hidden', 'closing');
-      $('apListeners').textContent = res.listeners ? parseInt(res.listeners).toLocaleString(t('meta.numberLocale')) : '—';
-      $('apPlaycount').textContent = res.playcount ? parseInt(res.playcount).toLocaleString(t('meta.numberLocale')) : '—';
-      
-      if (res.tags && res.tags.length > 0) {
-        res.tags.forEach(tag => {
-          const pill = document.createElement('span');
-          pill.className = 'ev-tag';
-          pill.textContent = tag;
-          $('apGlobalTags').appendChild(pill);
-        });
-        $('apTagsCard').classList.remove('hidden', 'closing');
-      }
-      
-      if (res.bio) {
-        // Bio summary do Last.fm vem com links HTML muitas vezes.
-        // Removendo ou formatando seria bom, mas podemos jogar o textContent puro (ou innerHTML confiavel)
-        const bioHtml = res.bio.replace(/<a href="https:\/\/www\.last\.fm.*?>Read more on Last\.fm<\/a>/, '').trim();
-        if (bioHtml.length > 10) {
-          $('apBio').innerHTML = bioHtml;
-          $('apBioCard').classList.remove('hidden', 'closing');
-          $('apBio').onclick = () => $('apBio').classList.toggle('expanded');
-        }
-      }
-    }
-  });
-}
-function closeArtistPage() { closeViewAnimated($('artistPage')); }
-
-function renderArtistTracks(container, sortedSongs) {
-  container.innerHTML = '';
-  const albums = new Map();
-  for (const s of sortedSongs) {
-    const ak = normalizeText(s.album || '') || '__none__';
-    let al = albums.get(ak);
-    if (!al) { al = { display: s.album || t('library.noAlbum'), year: s.year || '', songs: [] }; albums.set(ak, al); }
-    al.songs.push(s);
-  }
-  for (const [, al] of albums) {
-    if (al.display && al.display !== t('library.noAlbum')) {
-      const ah = document.createElement('div');
-      ah.className = 'group-album';
-      const firstSong = al.songs[0];
-      const th = document.createElement('div');
-      th.className = 'group-album-thumb';
-      if (!firstSong || coverState.get(firstSong.filePath) === false) {
-        th.textContent = '♪';
-      } else {
-        const ai = document.createElement('img');
-        ai.alt = ''; ai.loading = 'lazy';
-        ai.onerror = () => { coverState.set(firstSong.filePath, false); th.textContent = '♪'; };
-        ai.src = coverUrl(firstSong);
-        th.appendChild(ai);
-      }
-      const name = document.createElement('span'); name.className = 'group-album-name'; name.textContent = al.display;
-      const meta = document.createElement('span'); meta.className = 'group-album-meta';
-      const n = al.songs.length;
-      meta.textContent = (al.year ? `${al.year} · ` : '') + tn('count.track', n);
-      ah.append(th, name, meta);
-      container.appendChild(ah);
-    }
-    for (const s of al.songs) container.appendChild(buildSongCard(s, sortedSongs));
-  }
-}
-
-$('apBack').addEventListener('click', closeArtistPage);
-$('apPlay').addEventListener('click', () => playList(artistPageSongs));
 
 // ====================== Playlists (view <syn-playlists>) ======================
 // O domínio de playlists vive na ilha <syn-playlists> (dona da grade+página, CRUD, drag,
@@ -638,20 +347,37 @@ wireSongCardDelegation();
 // document) e o renderer, dono do player/biblioteca, executa. Desacopla as views das
 // funções do renderer — a view não chama playList/renderList direto, emite a intenção.
 function emitIntent(name, detail) { document.dispatchEvent(new CustomEvent(name, { detail })); }
+// Ilhas: biblioteca (tela principal) + adicionar/downloads. Injeção CRUZADA via thunks
+// (library precisa dos cards de job do add; add precisa do collapseSearch da library).
+const synLibrary = document.querySelector('syn-library');
+const synAdd = document.querySelector('syn-add');
+if (synAdd) Object.assign(synAdd, {
+  t, toast, showScanIndicator, hideScanIndicator, makeCenterCrop,
+  collapseSearch: () => synLibrary && synLibrary.collapseSearch(),
+});
+if (synLibrary) Object.assign(synLibrary, {
+  t, tn, toast, closeView: (el) => closeViewAnimated(el),
+  getPalette, coverUrl, coverState, spawnPlayBurst, refreshToolbarStatus,
+  pendingCards: () => (synAdd ? synAdd.pendingCards() : []),
+  hasPending: () => !!(synAdd && synAdd.hasPending()),
+});
+// Painel da fila (engine no renderer; injeta leitura da fila, ações por intent).
+const synQueue = document.querySelector('syn-queue');
+if (synQueue) Object.assign(synQueue, { t, coverUrl, coverState, getQueue: () => queue, getIndex: () => queueIndex });
+
 function wireViewIntents() {
   document.addEventListener('syn:player:play-list', (e) => playList((e.detail && e.detail.songs) || []));
   document.addEventListener('syn:player:mark-cards', () => markPlayingCards());
-  document.addEventListener('syn:library:refresh', () => renderList());
+  document.addEventListener('syn:library:refresh', () => { if (synLibrary) synLibrary.refresh(); });
   document.addEventListener('syn:library:reload', () => reloadLibrary());
   document.addEventListener('syn:devices:resync', () => maybeResync());
   document.addEventListener('syn:toolbar:refresh', () => refreshToolbarStatus());
+  document.addEventListener('syn:add:close', () => { if (synAdd) synAdd.close(); });
+  document.addEventListener('syn:queue:jump', (e) => playAt(e.detail.index));
+  document.addEventListener('syn:queue:remove', (e) => removeFromQueue(e.detail.index));
+  document.addEventListener('syn:queue:reorder', (e) => reorderQueue(e.detail.from, e.detail.to));
 }
 wireViewIntents();
-
-// Ilha "Adicionar música" + downloads (owns #addBar/jobs). Injeta glue/UI; expõe
-// pendingCards()/hasPending()/jobStatusMsg() p/ a biblioteca/toolbar.
-const synAdd = document.querySelector('syn-add');
-if (synAdd) Object.assign(synAdd, { t, toast, showScanIndicator, hideScanIndicator, collapseSearch, makeCenterCrop });
 
 // ====================== Editor (modal) ======================
 function showEditor() { $('editorBackdrop').classList.remove('hidden', 'closing'); }
@@ -1530,7 +1256,7 @@ document.addEventListener('syn:settings:saved', (e) => {
     if ($('nowPlaying').classList.contains('lyrics-mode')) renderNpLyrics(); // aplica/remove gutters
     updateChordsBtn();
   }
-  if (d.geniusChanged) { for (const k of Object.keys(artistImgCache)) delete artistImgCache[k]; }
+  if (d.geniusChanged && synLibrary) synLibrary.clearArtistCache();
   if (d.lastfmChanged) { for (const k of Object.keys(globalPlaycountCache)) delete globalPlaycountCache[k]; }
   reloadLibrary(); // a pasta pode ter mudado
 });
@@ -1577,45 +1303,15 @@ const audio = new Audio();
 // Electron 41 / Chromium novo, que passou a impor isso de forma estrita.)
 audio.crossOrigin = 'anonymous';
 
+// Ilha do grafo Web Audio + EQ (headless). Dona de audioCtx/analyser/eqFilters; os
+// visualizadores abaixo leem synAudio.analyser/freqData; o engine chama synAudio.ensureGraph().
+const synAudio = document.querySelector('syn-audio');
+if (synAudio) Object.assign(synAudio, { audio, t, toast, blockedDuringLyricsEdit });
+
 // ---- Visualizador de espectro (Web Audio API) ----
 // Liga o <audio> a um AnalyserNode e desenha as frequências num canvas atrás
 // do conteúdo do card. IMPORTANTE: ao criar o MediaElementSource o áudio passa
 // a fluir pelo grafo — por isso o AudioContext precisa estar "running" (resume).
-let audioCtx = null, analyser = null, sourceNode = null, freqData = null;
-// Equalizador de 6 bandas (2 graves, 2 médios, 2 agudos) via BiquadFilter
-let eqFilters = null;
-let eqGains = [0, 0, 0, 0, 0, 0];
-let eqEnabled = false;
-let eqPresets = []; // presets do usuário
-let _litEq = null;  // ilha Lit do EQ (bandas+toggle), quando montada (bundle)
-
-function ensureAnalyser() {
-  if (analyser) { if (audioCtx.state === 'suspended') audioCtx.resume(); return; }
-  try {
-    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    sourceNode = audioCtx.createMediaElementSource(audio);
-    analyser = audioCtx.createAnalyser();
-    analyser.fftSize = 128;               // 64 bins de frequência
-    analyser.smoothingTimeConstant = 0.82; // suaviza o movimento das barras
-    // cadeia de equalização entre a fonte e o analisador (o visualizador reflete o EQ)
-    eqFilters = EQ_BANDS.map((b) => {
-      const flt = audioCtx.createBiquadFilter();
-      flt.type = b.type;
-      flt.frequency.value = b.f;
-      if (b.type === 'peaking') flt.Q.value = 1.0;
-      flt.gain.value = 0;
-      return flt;
-    });
-    let node = sourceNode;
-    for (const flt of eqFilters) { node.connect(flt); node = flt; }
-    node.connect(analyser);
-    analyser.connect(audioCtx.destination);
-    freqData = new Uint8Array(analyser.frequencyBinCount);
-    if (_litViz) { _litViz.analyser = analyser; _litViz.freqData = freqData; }
-    applyEq();
-    audioCtx.resume();
-  } catch { analyser = null; }
-}
 
 // HSL helpers p/ derivar as cores das barras a partir da paleta da capa
 // cores das barras: fiéis à paleta da capa (MESMO matiz), com saturação preservada
@@ -1639,13 +1335,13 @@ function resizeViz() {
 }
 
 function drawViz() {
-  if (!vizCanvas || !analyser) { vizRAF = null; return; }
+  if (!vizCanvas || !synAudio.analyser) { vizRAF = null; return; }
   const ctx = vizCtx;
   const w = vizCanvas.width, h = vizCanvas.height;
   ctx.clearRect(0, 0, w, h);
-  analyser.getByteFrequencyData(freqData);
+  synAudio.analyser.getByteFrequencyData(synAudio.freqData);
 
-  const bins = freqData.length;
+  const bins = synAudio.freqData.length;
   const bars = Math.min(44, bins);
   const usable = Math.floor(bins * 0.85); // descarta as frequências mais altas (quase sempre fracas)
   const step = Math.max(1, Math.floor(usable / bars));
@@ -1656,7 +1352,7 @@ function drawViz() {
   const colors = deriveBarColors(vizCurPal);
 
   for (let i = 0; i < bars; i++) {
-    let v = 0; for (let k = 0; k < step; k++) v += freqData[i * step + k] || 0; v /= step;
+    let v = 0; for (let k = 0; k < step; k++) v += synAudio.freqData[i * step + k] || 0; v /= step;
     const bh = Math.max(h * 0.03, (v / 255) * h * 0.96);
     const x = i * (bw + gap);
     const y = h - bh;
@@ -1673,8 +1369,8 @@ function drawViz() {
 }
 
 function startVisualizer(cardEl) {
-  ensureAnalyser();
-  if (!analyser) return;
+  synAudio.ensureGraph();
+  if (!synAudio.analyser) return;
   // mesmo card já animando: nada a refazer (a cor interpola sozinha via barTargetPal)
   if (vizCard === cardEl && vizRAF) return;
   stopVisualizerLoop();
@@ -1849,12 +1545,12 @@ async function playAt(index) {
   const ok = await loadAndPlay(current);
   if (!ok) return;
   markPlayingCards();
-  renderQueue();
+  if (synQueue) synQueue.render();
 }
 
 // toca a partir de um card: a fila vem da lista de contexto (visível, ou a do artista)
 function playFromCard(song, listOverride) {
-  ensureAnalyser(); // cria/retoma o AudioContext dentro do gesto do usuário
+  synAudio.ensureGraph(); // cria/retoma o AudioContext dentro do gesto do usuário
   queue = (listOverride && listOverride.length ? listOverride : playerStore.visibleList).slice();
   let idx = queue.findIndex((s) => s.filePath === song.filePath);
   if (idx < 0) { queue = [song]; idx = 0; } // faixa fora da lista visível: toca só ela
@@ -1870,7 +1566,7 @@ function enqueueNext(s) {
     if (existing < queueIndex) queueIndex--;
   }
   queue.splice(queueIndex + 1, 0, s);
-  renderQueue();
+  if (synQueue) synQueue.render();
   const title = s.title || (s.fileName || '').replace(/\.mp3$/i, '');
   toast(t('player.playsNext', { title }), 'success');
 }
@@ -1883,20 +1579,20 @@ function reorderQueue(from, to) {
   if (queueIndex === from) queueIndex = to;
   else if (from < queueIndex && to >= queueIndex) queueIndex--;
   else if (from > queueIndex && to <= queueIndex) queueIndex++;
-  renderQueue();
+  if (synQueue) synQueue.render();
 }
 
 function removeFromQueue(i) {
   if (i === queueIndex) return; // a faixa atual não sai da fila
   queue.splice(i, 1);
   if (i < queueIndex) queueIndex--;
-  renderQueue();
+  if (synQueue) synQueue.render();
 }
 
 // toca uma lista de faixas a partir de um índice (cards de artista / botão Tocar)
 function playList(list, idx = 0) {
   if (!list || !list.length) return;
-  ensureAnalyser();
+  synAudio.ensureGraph();
   queue = list.slice();
   playAt(idx >= 0 && idx < list.length ? idx : 0);
 }
@@ -1907,7 +1603,7 @@ function togglePlay() {
     if (playerStore.visibleList.length) playFromCard(playerStore.visibleList[0]);
     return;
   }
-  ensureAnalyser(); // retoma o AudioContext dentro do gesto
+  synAudio.ensureGraph(); // retoma o AudioContext dentro do gesto
   if (audio.paused) audio.play(); else audio.pause();
 }
 
@@ -2038,12 +1734,12 @@ let plBeat = 0;
 
 function drawPlBeat() {
   const player = $('player');
-  if (!analyser || player.classList.contains('hidden')) { plVizRAF = null; return; }
-  analyser.getByteFrequencyData(freqData);
+  if (!synAudio.analyser || player.classList.contains('hidden')) { plVizRAF = null; return; }
+  synAudio.analyser.getByteFrequencyData(synAudio.freqData);
 
   // energia dos graves → pulso (ataque rápido, queda suave)
-  const nb = Math.max(4, freqData.length >> 5);
-  let e = 0; for (let i = 0; i < nb; i++) e += freqData[i];
+  const nb = Math.max(4, synAudio.freqData.length >> 5);
+  let e = 0; for (let i = 0; i < nb; i++) e += synAudio.freqData[i];
   e /= nb * 255;
   plBeat += (e - plBeat) * (e > plBeat ? 0.45 : 0.12);
   player.style.setProperty('--beat', plBeat.toFixed(3));
@@ -2053,8 +1749,8 @@ function drawPlBeat() {
 
 function startPlViz() {
   if (plVizRAF) return;
-  ensureAnalyser();
-  if (!analyser) return;
+  synAudio.ensureGraph();
+  if (!synAudio.analyser) return;
   plVizRAF = requestAnimationFrame(drawPlBeat);
 }
 function stopPlViz() {
@@ -2272,19 +1968,14 @@ $('npQueueBtn').addEventListener('click', () => {
   if (show) {
     p.classList.remove('hidden', 'closing');
     p.classList.add('np-mode');
-    renderQueue();
+    if (synQueue) synQueue.render();
   }
 });
 $('npEqBtn').addEventListener('click', () => {
   const p = $('eqPanel');
   const show = p.classList.contains('hidden');
   hideNpPanels();
-  if (show) {
-    p.classList.remove('hidden', 'closing');
-    p.classList.add('np-mode');
-    ensureLitEq(); syncLitEq();
-    renderEqPresetOptions();
-  }
+  if (show && synAudio) synAudio.openNpPanel();
 });
 
 // ---- Visualizador circular da Now Playing ----
@@ -2298,11 +1989,11 @@ function sizeNpViz() {
 }
 function drawNpViz() {
   const cv = $('npViz');
-  if (!cv || !analyser || !npOpen()) { npVizRAF = null; return; }
+  if (!cv || !synAudio.analyser || !npOpen()) { npVizRAF = null; return; }
   const ctx = cv.getContext('2d');
   const w = cv.width, h = cv.height, cx = w / 2, cy = h / 2;
   ctx.clearRect(0, 0, w, h);
-  analyser.getByteFrequencyData(freqData);
+  synAudio.analyser.getByteFrequencyData(synAudio.freqData);
 
   // o anel acompanha o TAMANHO ATUAL DA CAPA (inclui o zoom do modo ocioso e a tela cheia)
   const coverRect = $('npCover').getBoundingClientRect();
@@ -2312,7 +2003,7 @@ function drawNpViz() {
   const baseR = coverR * 1.06;     // começa logo após a borda da capa
   const maxLen = coverR * 0.62;    // barras crescem ~60% do raio da capa (um pouco além)
 
-  const bins = freqData.length;
+  const bins = synAudio.freqData.length;
   const bars = 84;
   npCurPal = lerpPal(npCurPal, barTargetPal, 0.09); // transição suave ao trocar de música
   const colors = deriveBarColors(npCurPal);
@@ -2323,7 +2014,7 @@ function drawNpViz() {
     // espelha o espectro nos dois lados para um anel simétrico
     const half = i < bars / 2 ? i : (bars - 1 - i);
     const idx = Math.floor((half / (bars / 2)) * bins * 0.8);
-    const v = (freqData[idx] || 0) / 255;
+    const v = (synAudio.freqData[idx] || 0) / 255;
     const len = coverR * 0.04 + v * maxLen;
     const ang = (i / bars) * Math.PI * 2 - Math.PI / 2;
     const x1 = cx + Math.cos(ang) * baseR, y1 = cy + Math.sin(ang) * baseR;
@@ -2338,9 +2029,9 @@ function drawNpViz() {
   npVizRAF = requestAnimationFrame(drawNpViz);
 }
 function startNpViz() {
-  ensureAnalyser();
+  synAudio.ensureGraph();
   // sempre re-injeta (cobre o early-return do ensureAnalyser quando o analyser já existia)
-  if (_litViz) { _litViz.analyser = analyser; _litViz.freqData = freqData; _litViz.active = true; return; }
+  if (_litViz) { _litViz.analyser = synAudio.analyser; _litViz.freqData = synAudio.freqData; _litViz.active = true; return; }
   if (npVizRAF) return;
   sizeNpViz();
   npVizRAF = requestAnimationFrame(drawNpViz);
@@ -2421,7 +2112,7 @@ _litReady.then((m) => {
         toggle: togglePlay, next: playNext, prev: playPrev,
         shuffle: toggleShuffle, repeat: cycleRepeat,
         seek: seekTo, setVolume,
-        openNowPlaying, toggleEq: toggleEqPanel, toggleQueue: toggleQueuePanel, closePlayer: closePlayerAction,
+        openNowPlaying, toggleEq: () => synAudio && synAudio.togglePanel(), toggleQueue: () => synQueue && synQueue.toggle(), closePlayer: closePlayerAction,
       };
       // monta o mini-player Lit NO LUGAR do #player legado (vira o próprio #player)
       if (customElements.get('syn-mini-player')) {
@@ -2443,7 +2134,7 @@ _litReady.then((m) => {
         if (npVizRAF) { cancelAnimationFrame(npVizRAF); npVizRAF = null; } // para o loop legado antes de trocar o canvas
         const v = document.createElement('syn-visualizer');
         v.coverEl = document.getElementById('npCover');
-        if (analyser) { v.analyser = analyser; v.freqData = freqData; } // se já criado
+        if (synAudio.analyser) { v.analyser = synAudio.analyser; v.freqData = synAudio.freqData; } // se já criado
         v.palette = barTargetPal;
         oldViz.replaceWith(v);
         _litViz = v;
@@ -2633,56 +2324,6 @@ async function saveChordsInline() {
 
 
 // ---- Fila (painel) ----
-function toggleQueuePanel() {
-  $('eqPanel').classList.add('hidden'); // fila e EQ não coexistem
-  const p = $('queuePanel');
-  p.classList.remove('np-mode'); // aberto pelo mini-player usa o visual padrão
-  p.classList.toggle('hidden');
-  if (!p.classList.contains('hidden')) renderQueue();
-}
-$('queueBtn').addEventListener('click', toggleQueuePanel);
-$('queueClose').addEventListener('click', () => { $('queuePanel').classList.add('hidden'); $('queuePanel').classList.remove('np-mode'); });
-
-let queueDragFrom = -1;
-function renderQueue() {
-  if ($('queuePanel').classList.contains('hidden')) return;
-  const list = $('queueList');
-  list.innerHTML = '';
-  queue.forEach((s, i) => {
-    // ilha Lit syn-queue-item: dirigida por VM; intents → orquestração existente (closure i)
-    const item = document.createElement('syn-queue-item');
-    item.t = t;
-    item.vm = {
-      path: s.filePath,
-      title: s.title || (s.fileName || '').replace(/\.mp3$/i, ''),
-      artist: s.artist || '',
-      src: coverUrl(s),
-      coverKnown: coverState.get(s.filePath),
-      current: i === queueIndex,
-    };
-    item.addEventListener('syn:queue:jump', () => playAt(i));
-    item.addEventListener('syn:queue:remove', () => removeFromQueue(i));
-    item.addEventListener('syn:queue:cover', () => coverState.set(s.filePath, false));
-
-    // reordenação por arraste
-    item.draggable = true;
-    item.addEventListener('dragstart', () => { queueDragFrom = i; item.classList.add('dragging'); });
-    item.addEventListener('dragend', () => {
-      item.classList.remove('dragging');
-      list.querySelectorAll('.queue-item.drop-target').forEach((el) => el.classList.remove('drop-target'));
-      queueDragFrom = -1;
-    });
-    item.addEventListener('dragover', (e) => { e.preventDefault(); item.classList.add('drop-target'); });
-    item.addEventListener('dragleave', () => item.classList.remove('drop-target'));
-    item.addEventListener('drop', (e) => {
-      e.preventDefault();
-      item.classList.remove('drop-target');
-      if (queueDragFrom >= 0 && queueDragFrom !== i) reorderQueue(queueDragFrom, i);
-    });
-
-    list.appendChild(item);
-  });
-}
 
 // ---- Atalhos de teclado ----
 document.addEventListener('keydown', (e) => {
@@ -2710,10 +2351,10 @@ document.addEventListener('keydown', (e) => {
     if (vis('devicesModal')) { synDevices.close(); return; }
     if (vis('settingsModal')) { closeViewAnimated($('settingsModal')); return; }
     if (!$('eqPanel').classList.contains('hidden')) { $('eqPanel').classList.add('hidden'); return; }
-    if (!$('queuePanel').classList.contains('hidden')) { $('queuePanel').classList.add('hidden'); return; }
+    if (!$('queuePanel').classList.contains('hidden')) { if (synQueue) synQueue.close(); return; }
     if (vis('playlistPage')) { synPlaylists.closePage(); synPlaylists.open(); return; }
     if (vis('playlistsView')) { synPlaylists.closeGrid(); return; }
-    if (vis('artistPage')) { closeArtistPage(); return; }
+    if (vis('artistPage')) { if (synLibrary) synLibrary.closeArtist(); return; }
     if (synAdd && synAdd.isOpen()) { $('ytUrl').value = ''; synAdd.close(); return; }
     return;
   }
@@ -2759,192 +2400,6 @@ window.addEventListener('resize', () => { if (npOpen()) sizeNpViz(); });
 
 applyPlayerIcons();
 
-// ====================== Equalizador ======================
-// nomes via chave de tradução (resolvidos na hora de renderizar)
-
-
-// aplica os ganhos atuais aos filtros (0 quando o EQ está desligado = bypass)
-function applyEq() {
-  if (!eqFilters) return;
-  eqFilters.forEach((flt, i) => { flt.gain.value = eqEnabled ? (eqGains[i] || 0) : 0; });
-}
-
-function updateEqBtn() {
-  const on = eqEnabled && eqGains.some((g) => g !== 0);
-  $('eqBtn').classList.toggle('active', on);
-  $('npEqBtn').classList.toggle('active', on);
-}
-
-let eqPersistTimer = null;
-function persistEqState() {
-  updateEqBtn();
-  clearTimeout(eqPersistTimer);
-  eqPersistTimer = setTimeout(() => {
-    window.api.setConfig({ eq: { enabled: eqEnabled, gains: eqGains } });
-  }, 300);
-}
-
-// Ilha Lit do EQ: <syn-eq> (bandas + toggle + zerar) substitui #eqBands/#eqEnabled/#eqFlat.
-// Os presets/save seguem legados (o componente não os cobre). Eventos fiam no estado/Web
-// Audio existente (eqGains/applyEq/persistEqState).
-function ensureLitEq() {
-  if (_litEq) return;
-  const box = $('eqBands');
-  if (!box) return;
-  box.innerHTML = '';
-  box.style.display = 'block'; // .eq-bands legado é flex → o syn-eq (item único) encolheria; block faz preencher
-  // modo `bare`: só as 6 bandas. Título/toggle/zerar/presets ficam no painel legado
-  // (evita header/controles duplicados → enquadramento limpo).
-  const eq = document.createElement('syn-eq');
-  eq.bare = true;
-  eq.addEventListener('syn:eq:change', (e) => {
-    eqGains = e.detail.gains.slice();
-    // auto-liga ao mexer numa banda p/ valor != 0 (espelha o legado)
-    if (!eqEnabled && eqGains.some((g) => g !== 0)) { eqEnabled = true; $('eqEnabled').checked = true; applyEq(); }
-    applyEq();
-    persistEqState();
-  });
-  box.appendChild(eq);
-  _litEq = eq;
-}
-function syncLitEq() { if (_litEq) { _litEq.gains = eqGains.slice(); _litEq.enabled = eqEnabled; } }
-
-function renderEqPresetOptions() {
-  const sel = $('eqPreset');
-  sel.innerHTML = '';
-  const def = document.createElement('option');
-  def.value = ''; def.textContent = t('eq.presets');
-  sel.appendChild(def);
-  const og1 = document.createElement('optgroup');
-  og1.label = t('eq.builtinGroup');
-  EQ_BUILTINS.forEach((p, i) => {
-    const o = document.createElement('option'); o.value = 'b' + i; o.textContent = t(p.nameKey); og1.appendChild(o);
-  });
-  sel.appendChild(og1);
-  if (eqPresets.length) {
-    const og2 = document.createElement('optgroup');
-    og2.label = t('eq.myPresetsGroup');
-    eqPresets.forEach((p, i) => {
-      const o = document.createElement('option'); o.value = 'u' + i; o.textContent = p.name; og2.appendChild(o);
-    });
-    sel.appendChild(og2);
-  }
-}
-
-function loadEqPreset(gains, enable) {
-  eqGains = gains.slice(0, 6).map((n) => Math.max(-12, Math.min(12, parseInt(n, 10) || 0)));
-  while (eqGains.length < 6) eqGains.push(0);
-  if (enable) { eqEnabled = true; $('eqEnabled').checked = true; }
-  applyEq();
-  syncLitEq();
-  persistEqState();
-}
-
-function toggleEqPanel() {
-  if (blockedDuringLyricsEdit()) return;
-  const p = $('eqPanel');
-  p.classList.remove('np-mode'); // aberto pelo mini-player usa o visual padrão
-  p.classList.toggle('hidden');
-  if (!p.classList.contains('hidden')) {
-    $('queuePanel').classList.add('hidden');
-    ensureLitEq(); syncLitEq();
-    renderEqPresetOptions();
-  }
-}
-$('eqBtn').addEventListener('click', toggleEqPanel);
-$('eqClose').addEventListener('click', () => { $('eqPanel').classList.add('hidden'); $('eqPanel').classList.remove('np-mode'); });
-$('eqEnabled').addEventListener('change', () => {
-  eqEnabled = $('eqEnabled').checked;
-  applyEq();
-  persistEqState();
-});
-$('eqFlat').addEventListener('click', () => loadEqPreset([0, 0, 0, 0, 0, 0], false));
-$('eqPreset').addEventListener('change', () => {
-  const v = $('eqPreset').value;
-  if (!v) return;
-  const p = v[0] === 'b' ? EQ_BUILTINS[+v.slice(1)] : eqPresets[+v.slice(1)];
-  if (p) {
-    loadEqPreset(p.gains, true);
-    $('eqName').value = p.builtin ? '' : p.name;
-  }
-});
-$('eqSave').addEventListener('click', async () => {
-  const name = $('eqName').value.trim();
-  if (!name) { toast(t('eq.nameRequired'), 'error'); return; }
-  const idx = eqPresets.findIndex((p) => p.name.toLowerCase() === name.toLowerCase());
-  const entry = { name, gains: eqGains.slice() };
-  if (idx >= 0) eqPresets[idx] = entry; else eqPresets.push(entry);
-  await window.api.setConfig({ eqPresets });
-  renderEqPresetOptions();
-  toast(t('eq.presetSaved'), 'success');
-});
-$('eqDelete').addEventListener('click', async () => {
-  const v = $('eqPreset').value;
-  if (v[0] !== 'u') { toast(t('eq.selectOwnPreset'), 'error'); return; }
-  eqPresets.splice(+v.slice(1), 1);
-  await window.api.setConfig({ eqPresets });
-  renderEqPresetOptions();
-  $('eqName').value = '';
-  toast(t('eq.presetDeleted'), 'success');
-});
-
-async function initEq() {
-  try {
-    const cfg = await window.api.getConfig();
-    if (cfg.eq && Array.isArray(cfg.eq.gains) && cfg.eq.gains.length === 6) {
-      eqGains = cfg.eq.gains.map((n) => Math.max(-12, Math.min(12, parseInt(n, 10) || 0)));
-    }
-    eqEnabled = !!(cfg.eq && cfg.eq.enabled);
-    if (Array.isArray(cfg.eqPresets)) {
-      eqPresets = cfg.eqPresets.filter((p) => p && p.name && Array.isArray(p.gains));
-    }
-  } catch { /* usa padrões */ }
-  $('eqEnabled').checked = eqEnabled;
-  updateEqBtn();
-  applyEq(); // filtros podem ainda não existir; reaplica ao criar
-}
-
-// fecha o EQ ao abrir a fila (e vice-versa já tratado no eqBtn)
-$('queueBtn').addEventListener('click', () => $('eqPanel').classList.add('hidden'));
-
-// ====================== Busca (expansível) e agrupamento ======================
-function expandSearch() {
-  if (synAdd) synAdd.close();
-  $('searchBox').classList.add('expanded');
-  $('toolbar').classList.add('searching');
-  $('searchInput').focus();
-}
-function collapseSearch() {
-  $('searchBox').classList.remove('expanded');
-  $('toolbar').classList.remove('searching');
-}
-function clearAndCollapseSearch() {
-  searchQuery = '';
-  $('searchInput').value = '';
-  collapseSearch();
-  listEntrance = true;
-  renderList();
-}
-$('searchBtn').addEventListener('click', expandSearch);
-$('searchInput').addEventListener('input', () => {
-  searchQuery = $('searchInput').value;
-  listEntrance = true;
-  renderList();
-});
-$('searchInput').addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') { e.stopPropagation(); clearAndCollapseSearch(); }
-});
-$('searchInput').addEventListener('blur', () => {
-  if (!$('searchInput').value.trim()) collapseSearch();
-});
-$('searchClose').addEventListener('click', clearAndCollapseSearch);
-$('groupToggle').addEventListener('click', () => {
-  groupBy = !groupBy;
-  $('groupToggle').classList.toggle('active', groupBy);
-  try { localStorage.setItem('lib.groupBy', groupBy ? '1' : '0'); } catch { /* ok */ }
-  listEntrance = true;
-  renderList();
-});
 
 // ---- Scrollbar customizada da listagem: fade suave, visível com o mouse na área ----
 (function initLibScrollbar() {
@@ -3039,15 +2494,6 @@ $('groupToggle').addEventListener('click', () => {
   bar.addEventListener('wheel', (e) => { contentEl.scrollTop += e.deltaY; }, { passive: true });
 })();
 
-// restaura preferências de visualização
-(function initLibPrefs() {
-  try { groupBy = localStorage.getItem('lib.groupBy') === '1'; } catch { /* ok */ }
-  try {
-    const c = JSON.parse(localStorage.getItem('lib.collapsed') || '[]');
-    if (Array.isArray(c)) collapsedArtists = new Set(c);
-  } catch { /* ok */ }
-  $('groupToggle').classList.toggle('active', groupBy);
-})();
 
 // ====================== Dispositivos / sincronização ======================
 
@@ -3122,7 +2568,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   }
 
   // o restante da inicialização não bloqueia a exibição da tela inicial
-  Promise.all([playlistsStore.load(), synDevices ? synDevices.initContext() : null, initEq()]).catch(() => {});
+  Promise.all([playlistsStore.load(), synDevices ? synDevices.initContext() : null, synAudio ? synAudio.initEq() : null]).catch(() => {});
   window.api.getConfig().then((cfg) => {
     if (cfg) advancedEdit = cfg.advancedEdit === true;
     if (cfg && !cfg.apiKey) {

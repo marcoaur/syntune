@@ -483,6 +483,15 @@
     </div>
   </div>
 
+  <!-- Áudio: grafo Web Audio + EQ (headless + owns #eqPanel por id) -->
+  <syn-audio></syn-audio>
+
+  <!-- Fila de reprodução (controller; owns #queuePanel por id) -->
+  <syn-queue></syn-queue>
+
+  <!-- Biblioteca: lista/busca/agrupar/artista (controller; owns #songList/#artistPage por id) -->
+  <syn-library></syn-library>
+
   <!-- Adicionar música + motor de downloads (controller; owns #addBar por id) -->
   <syn-add></syn-add>
 
