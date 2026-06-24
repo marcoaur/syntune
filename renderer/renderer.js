@@ -63,7 +63,6 @@ let pendingJobs = [];    // downloads/enriquecimentos em andamento (transientes)
 // Sincronização com dispositivo
 // activeDevice/syncedKeys vivem em devicesStore (fonte única; core-store.js).
 // Leitura: devicesStore.activeDevice / devicesStore.syncedKeys; escrita via setX.
-let deviceOnlySongs = [];       // faixas que só existem no dispositivo (entram na lista)
 let showingIgnored = false;     // sheet de dispositivos: lista de ignorados visível?
 
 // Busca / agrupamento
@@ -300,7 +299,7 @@ function renderList() {
   for (const job of pendingJobs) list.appendChild(buildPendingCard(job));
 
   // músicas da biblioteca + faixas que só existem no dispositivo, filtradas pela busca
-  const all = libraryStore.songs.concat(deviceOnlySongs);
+  const all = libraryStore.songs.concat(devicesStore.deviceOnlySongs);
   const terms = normalizeText(searchQuery).split(/\s+/).filter(Boolean);
   const filtered = terms.length ? all.filter((s) => matchesQuery(s, terms)) : all;
   const sorted = sortSongs(filtered);
@@ -953,7 +952,7 @@ async function openEditor(song) {
     const res = await window.api.deviceEnrichFromDevice({ serial: song.serial, filePath: song.filePath });
     hideLoading();
     if (res.error) { toast(res.error, 'error'); return; }
-    deviceOnlySongs = deviceOnlySongs.filter((s) => s.filePath !== song.filePath);
+    devicesStore.setDeviceOnlySongs(devicesStore.deviceOnlySongs.filter((s) => s.filePath !== song.filePath));
     await reloadLibrary();
     song = { ...song, filePath: res.filePath, deviceOnly: false };
   }
@@ -1652,7 +1651,7 @@ async function saveDetailsWithSync(lrclibSync) {
 function onDeleteClick() {
   if (!currentFilePath) return;
   const s = libraryStore.songs.find((x) => x.filePath === currentFilePath)
-    || deviceOnlySongs.find((x) => x.filePath === currentFilePath)
+    || devicesStore.deviceOnlySongs.find((x) => x.filePath === currentFilePath)
     || { filePath: currentFilePath, fileName: $('fileName').textContent, title: $('title').value, artist: $('artist').value };
   hideEditor();
   openDeleteModal(s);
@@ -1758,7 +1757,7 @@ async function executeDelete(where) {
 
   // atualiza estado local (faixa device-only some; badges refletem a remoção)
   if (where === 'device' || where === 'both') {
-    if (s.deviceOnly) deviceOnlySongs = deviceOnlySongs.filter((x) => x.filePath !== s.filePath);
+    if (s.deviceOnly) devicesStore.setDeviceOnlySongs(devicesStore.deviceOnlySongs.filter((x) => x.filePath !== s.filePath));
     if (devicesStore.activeDevice) {
       try { const st = await window.api.deviceSyncState(devicesStore.activeDevice.serial); devicesStore.setSyncedKeys(st.keys || []); } catch { /* ok */ }
     }
@@ -3489,7 +3488,7 @@ window.api.onDeviceAttached(async (info) => {
 window.api.onDeviceDetached((info) => {
   if (devicesStore.activeDevice && devicesStore.activeDevice.serial === info.serial) {
     devicesStore.setActiveDevice(null);
-    deviceOnlySongs = [];
+    devicesStore.setDeviceOnlySongs([]);
     // mantém os badges com o último estado conhecido (sync.json)
     renderList();
   }
@@ -3527,7 +3526,7 @@ async function runScanAndSync(info) {
     if (scan && scan.error) { toast(scan.error, 'error'); return; }
     if (Array.isArray(scan.syncedKeys)) devicesStore.setSyncedKeys(scan.syncedKeys);
     devicesStore.setHasSyncContext(true);
-    deviceOnlySongs = scan.deviceOnly || [];
+    devicesStore.setDeviceOnlySongs(scan.deviceOnly || []);
     deviceStats[info.serial] = { pendingCount: scan.pendingCount, pendingBytes: scan.pendingBytes || 0 };
     paintCapacityRow(info.serial);
     renderList();
@@ -3612,7 +3611,7 @@ function wireDeviceIntents() {
     await window.api.devicesUpdate({ serial, syncEnabled: enabled });
     await renderDevices();
     if (enabled && connected) runScanAndSync({ serial, nickname, label, configured: true, syncEnabled: true });
-    else if (!enabled && devicesStore.activeDevice && devicesStore.activeDevice.serial === serial) { devicesStore.setActiveDevice(null); deviceOnlySongs = []; renderList(); }
+    else if (!enabled && devicesStore.activeDevice && devicesStore.activeDevice.serial === serial) { devicesStore.setActiveDevice(null); devicesStore.setDeviceOnlySongs([]); renderList(); }
   });
   modal.addEventListener('syn:device:scope', (e) => { persistScope(e.detail.serial, e.detail.scope); refreshDeviceStats(e.detail.serial); });
   modal.addEventListener('syn:device:ignore', async (e) => { await window.api.devicesUpdate({ serial: e.detail.serial, ignored: e.detail.ignored }); await renderDevices(); });

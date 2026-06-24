@@ -13,9 +13,12 @@ export class DevicesService extends StoreService {
     /** @type {Set<string>} */ this.syncedKeys = new Set();
     /** há um dispositivo de referência → exibir badges de sync na biblioteca? */
     this.hasSyncContext = false;
+    /** faixas que só existem no dispositivo — entram na lista da biblioteca. */
+    this.deviceOnlySongs = [];
   }
   setActiveDevice(d) { this.set('activeDevice', d || null); }
   /** Aceita Set ou array de keys → normaliza p/ Set. */
   setSyncedKeys(keys) { this.set('syncedKeys', keys instanceof Set ? keys : new Set(keys || [])); }
   setHasSyncContext(v) { this.set('hasSyncContext', !!v); }
+  setDeviceOnlySongs(arr) { this.set('deviceOnlySongs', Array.isArray(arr) ? arr : []); }
 }
