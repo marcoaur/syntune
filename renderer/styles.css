@@ -1521,7 +1521,9 @@ select.input { cursor: pointer; }
 .np-vol input { width: 120px; accent-color: #fff; cursor: pointer; }
 
 /* Modo imersivo ocioso (sem mouse): controles somem, capa e aura assumem o palco */
-.np-cover { transition: transform 0.55s var(--ease), box-shadow 0.55s var(--ease); }
+/* `width` na transição: ao entrar/sair do karaokê a capa (e o anel, que a acompanha quadro
+   a quadro) encolhe/cresce de forma gradual em vez de saltar. */
+.np-cover { transition: transform 0.55s var(--ease), box-shadow 0.55s var(--ease), width 0.55s var(--ease); }
 .now-playing.idle { cursor: none; }
 .now-playing.idle .np-top { opacity: 0; pointer-events: none; transform: translateY(-12px); }
 .now-playing.idle .np-controls-group { opacity: 0; pointer-events: none; transform: translateY(16px); }
@@ -1596,7 +1598,11 @@ select.input { cursor: pointer; }
 
 .np-lyrics-view {
   position: absolute; inset: 0; z-index: 2;
-  display: none; flex-direction: column; align-items: center;
+  /* sempre montado (overlay position:absolute) e escondido por opacity/visibility — assim a
+     letra faz fade-in AO ativar e fade-out AO desativar o karaokê (display:none seria seco). */
+  display: flex; flex-direction: column; align-items: center;
+  opacity: 0; visibility: hidden; pointer-events: none;
+  transition: opacity 0.5s var(--ease), visibility 0s linear 0.5s;
   overflow-y: auto; scrollbar-width: none;
   padding: calc(var(--tb-height) + 70px) 8vw 32vh;
   overscroll-behavior: contain;
@@ -1607,7 +1613,10 @@ select.input { cursor: pointer; }
     transparent 0, rgba(0, 0, 0, 0.35) 9%, #000 22%, #000 64%, rgba(0, 0, 0, 0.35) 84%, transparent 100%);
 }
 .np-lyrics-view::-webkit-scrollbar { width: 0; height: 0; }
-.now-playing.lyrics-mode .np-lyrics-view { display: flex; }
+.now-playing.lyrics-mode .np-lyrics-view {
+  opacity: 1; visibility: visible; pointer-events: auto;
+  transition: opacity 0.5s var(--ease);
+}
 /* letra NÃO sincronizada (texto puro): mantém o overlay cheio e oculta o palco p/ leitura */
 .now-playing.lyrics-mode:not(.np-synced) .np-stage { display: none; }
 .now-playing.lyrics-mode:not(.np-synced) .np-bottom { background: linear-gradient(180deg, transparent, rgba(8, 8, 12, 0.55) 40%); }
@@ -1681,9 +1690,18 @@ select.input { cursor: pointer; }
 }
 .np-lyrics-view.synced .np-lyric:hover { color: #fff; }
 .np-lyrics-view.synced .np-lyric.active { color: #fff; transform: scale(1.03); }
+/* no quadro do re-render (ex.: toggle de acordes) a transição é cortada → a escala da linha em
+   foco aplica seca, sem o "pulo" (1→1.03). Restaurada no rAF seguinte (ver syn-lyrics updated). */
+.np-lyrics-view.synced .np-lyrics-track.no-anim .np-lyric { transition: none; }
 
 /* ----- Acordes sincronizados sobre a linha ----- */
-.np-lyrics-view.synced .np-lyric.has-chords { flex-direction: column; gap: 4px; }
+/* a chord-row flutua (absoluta) ACIMA do texto, fora do fluxo: ativar/desativar acordes não
+   empurra o texto → a linha em execução fica no lugar (só os acordes entram/saem em fade). */
+.np-lyrics-view.synced .np-lyric.has-chords { position: relative; }
+.np-lyrics-view.synced .np-lyric.has-chords > syn-chord-line {
+  position: absolute; left: 0; right: 0; margin-inline: auto;
+  bottom: calc(50% + 0.5em);
+}
 .np-chord-row {
   position: relative; width: 100%; max-width: 760px;
   height: 26px; margin: 0 auto;
@@ -1710,8 +1728,24 @@ select.input { cursor: pointer; }
   will-change: color, transform; /* cor/brilho/escala animados pelo rAF (decaimento) */
 }
 
-/* com acordes a janela mostra 6 linhas (em vez de 5) → linhas um pouco mais baixas */
-.np-lyrics-view.synced.chords-on .np-lyric { min-height: calc(var(--np-lyr-h) / 6); }
+/* mesmo espaçamento de linha com e sem acordes (a chord-row flutua acima, não ocupa slot) */
+/* as linhas de acorde (ilha <syn-chord-line>) entram em fade com leve subida ao ativar os
+   acordes — o host é recriado no toggle, então a animação dispara na entrada. `opacity:0` de
+   base evita o flash de 1 frame (o host pintaria visível antes do 0% pegar); `forwards`
+   segura o estado final (1). */
+/* acordes entram só em fade (a chord-row é absoluta acima do texto, não empurra a linha →
+   a linha em execução fica no lugar). opacity:0 de base evita o flash de 1 frame; forwards
+   segura o estado final. */
+.np-lyrics-view.synced.chords-on syn-chord-line { opacity: 0; animation: npChordIn 0.65s var(--ease) forwards; }
+@keyframes npChordIn { from { opacity: 0; } to { opacity: 1; } }
+/* reduced-motion: sem animação → não pode ficar preso em opacity:0 */
+@media (prefers-reduced-motion: reduce) {
+  .np-lyrics-view.synced.chords-on syn-chord-line { opacity: 1; animation: none; }
+}
+/* saída ao DESATIVAR os acordes: o renderer adiciona .chords-leaving, espera a animação e só
+   então re-renderiza sem os <syn-chord-line>. Especificidade > que a entrada p/ vencer o `animation`. */
+.np-lyrics-view.synced.chords-on.chords-leaving syn-chord-line { animation: npChordOut 0.45s var(--ease) forwards; }
+@keyframes npChordOut { from { opacity: 1; } to { opacity: 0; } }
 
 /* linha só de acordes (intro / trecho instrumental sem letra) */
 .np-lyrics-view.synced .np-lyric.np-chord-only {

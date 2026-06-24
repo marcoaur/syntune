@@ -71,7 +71,7 @@ export class SynNowPlaying extends HTMLElement {
   // ---------- modo ocioso ----------
   #wireIdle() {
     this._onWake = () => this.#wake();
-    this._onSleep = () => this.#sleepNow();
+    this._onSleep = (e) => this.#sleepNow(e);
     document.addEventListener('mousemove', this._onWake);
     document.documentElement.addEventListener('mouseleave', this._onSleep);
     document.documentElement.addEventListener('mouseenter', this._onWake);
@@ -84,7 +84,15 @@ export class SynNowPlaying extends HTMLElement {
   }
   #stopIdle() { clearTimeout(this._idleTimer); this.#el().classList.remove('idle'); }
   #wake() { if (!this.isOpen()) return; this.#el().classList.remove('idle'); this.#scheduleIdle(); }
-  #sleepNow() { if (this.isOpen() && !this.panelOpen()) { clearTimeout(this._idleTimer); this.#el().classList.add('idle'); } }
+  #sleepNow(e) {
+    // Ignora o mouseleave ESPÚRIO das regiões -webkit-app-region:drag (o .np-top é drag): sobre
+    // elas o SO assume o ponteiro e o documento dispara mouseleave com o cursor AINDA dentro da
+    // janela → flicker dos controles. Só vai a imersivo num leave REAL (cursor fora da viewport)
+    // ou perda de foco (blur, sem coordenadas).
+    if (e && e.type === 'mouseleave' &&
+        e.clientX > 0 && e.clientY > 0 && e.clientX < window.innerWidth && e.clientY < window.innerHeight) return;
+    if (this.isOpen() && !this.panelOpen()) { clearTimeout(this._idleTimer); this.#el().classList.add('idle'); }
+  }
 
   // ---------- tela cheia ----------
   isFullscreen() { return this._fullscreen; }

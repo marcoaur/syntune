@@ -195,7 +195,7 @@ export class SynLyrics extends ContainerMixin(SyntuneElement) {
       return html`<div class="np-lyrics-empty">${unsafeHTML(this.t('player.noLyrics'))}</div>`;
     }
 
-    const slots = hasChords ? 6 : 5; // 6 linhas na janela quando há acordes
+    const slots = 5; // mesmo espaçamento com e sem acordes (a chord-row flutua, não ocupa slot)
     this._slots = slots;
 
     return html`
@@ -250,6 +250,16 @@ export class SynLyrics extends ContainerMixin(SyntuneElement) {
 
     this._curTop = null; this._lastTop = -1; this._lastCenter = null;
     this.#syncRaf();
+    // pinta o 1º quadro AINDA neste ciclo (antes do paint): a linha em foco já sai com a escala/
+    // posição/opacidade certas. Sem isto, o re-render (ex.: (des)ativar acordes) cria os
+    // <div.np-lyric> sem .active e a transição `transform` anima 1→1.03 → a linha em evidência
+    // "pula" (encolhe e volta). `.no-anim` corta a transição SÓ neste quadro (a escala aplica
+    // seca); o próximo rAF a restaura p/ o pop suave na troca de linha durante a reprodução.
+    if (this.active && this._track) {
+      this._track.classList.add('no-anim');
+      this.#frame();
+      requestAnimationFrame(() => { if (this._track) this._track.classList.remove('no-anim'); });
+    }
   }
 
   // liga o rAF quando o karaokê está ativo e há trilho; senão para (perf).
