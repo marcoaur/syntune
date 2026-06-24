@@ -13,9 +13,9 @@ import { ICONS } from './modules/icons.js';
 import './components/index.js';
 // Capacidades headless (ARCHITECTURE-V2): acionáveis por qualquer um (toast-like).
 import { loading, palette, menu, confirm as confirmCap } from './components/capabilities.js';
-// Store-núcleo (ARCHITECTURE-V2 Fase 3): fonte única do estado central. Por ora só a
-// biblioteca (`songs`); o renderer escreve via libraryStore.setSongs e mantém o global
-// `songs` como ESPELHO (subscribe abaixo) — leitores migram pro store aos poucos.
+// Store-núcleo (ARCHITECTURE-V2 Fase 3): fonte única do estado central. O renderer lê/
+// escreve direto nos stores (libraryStore.songs/setSongs etc.); os mesmos singletons são
+// providos via context pelo <syn-app-root> p/ os componentes consumirem.
 import { libraryStore, playlistsStore, playerStore, devicesStore } from './services/core-store.js';
 
 // Substitui o confirm() nativo (síncrono/bloqueante) pela capacidade <syn-confirm> (async).
@@ -55,18 +55,12 @@ function applyStaticI18n() {
 }
 
 // ====================== Estado ======================
-let songs = [];          // ESPELHO de libraryStore.songs (fonte única; ver core-store.js)
-// Mantém o global sincronizado com o store-núcleo: todo setSongs reflete aqui até os
-// leitores migrarem para libraryStore.songs (subsistema a subsistema).
-libraryStore.subscribe('songs', (items) => { songs = items; });
+// `songs` vive em libraryStore (fonte única; core-store.js). Leitura: libraryStore.songs.
 let pendingJobs = [];    // downloads/enriquecimentos em andamento (transientes)
 
 // Sincronização com dispositivo
-// ESPELHOS de devicesStore (fonte única; ver core-store.js). Escrita via devicesStore.setX.
-let activeDevice = null;        // { serial, ... } dispositivo conectado + sync ligada
-let syncedKeys = new Set();     // keys (nome|artista|ano) sincronizadas no dispositivo de referência
-devicesStore.subscribe('activeDevice', (d) => { activeDevice = d; });
-devicesStore.subscribe('syncedKeys', (s) => { syncedKeys = s; });
+// activeDevice/syncedKeys vivem em devicesStore (fonte única; core-store.js).
+// Leitura: devicesStore.activeDevice / devicesStore.syncedKeys; escrita via setX.
 let hasSyncContext = false;     // há um dispositivo de referência p/ exibir badges de sync?
 let deviceOnlySongs = [];       // faixas que só existem no dispositivo (entram na lista)
 let showingIgnored = false;     // sheet de dispositivos: lista de ignorados visível?
@@ -305,7 +299,7 @@ function renderList() {
   for (const job of pendingJobs) list.appendChild(buildPendingCard(job));
 
   // músicas da biblioteca + faixas que só existem no dispositivo, filtradas pela busca
-  const all = songs.concat(deviceOnlySongs);
+  const all = libraryStore.songs.concat(deviceOnlySongs);
   const terms = normalizeText(searchQuery).split(/\s+/).filter(Boolean);
   const filtered = terms.length ? all.filter((s) => matchesQuery(s, terms)) : all;
   const sorted = sortSongs(filtered);
@@ -605,16 +599,15 @@ $('apBack').addEventListener('click', closeArtistPage);
 $('apPlay').addEventListener('click', () => playList(artistPageSongs));
 
 // ====================== Playlists ======================
-let playlists = [];       // ESPELHO de playlistsStore.playlists (fonte única; core-store.js)
-playlistsStore.subscribe('playlists', (arr) => { playlists = arr; });
+// Estado em playlistsStore (fonte única; core-store.js). Leitura: playlistsStore.playlists.
 let currentPlaylistId = null;
 let plDragFrom = -1;
 
 async function loadPlaylists() { await playlistsStore.load(); }
 async function savePlaylists() { await playlistsStore.save(); }
-function findPlaylist(id) { return playlists.find((p) => p.id === id); }
+function findPlaylist(id) { return playlistsStore.playlists.find((p) => p.id === id); }
 function playlistSongs(p) {
-  const byPath = new Map(songs.map((s) => [s.filePath, s]));
+  const byPath = new Map(libraryStore.songs.map((s) => [s.filePath, s]));
   return (p.tracks || []).map((fp) => byPath.get(fp)).filter(Boolean);
 }
 function playlistCoverHtml(pSongs) {
@@ -636,7 +629,7 @@ function playlistCoverHtml(pSongs) {
 
 function createPlaylist(name) {
   const p = { id: 'pl-' + Date.now() + '-' + Math.random().toString(36).slice(2, 5), name: name || t('playlists.new'), tracks: [], createdAt: Date.now() };
-  playlists.push(p);
+  playlistsStore.playlists.push(p);
   savePlaylists();
   return p;
 }
@@ -675,7 +668,7 @@ function renderPlaylistsGrid() {
     _plIntentsWired = true;
   }
   grid.innerHTML = '';
-  for (const p of playlists) {
+  for (const p of playlistsStore.playlists) {
     const ps = playlistSongs(p);
     const c = document.createElement('syn-playlist-card');
     c.pid = p.id; c.name = p.name; c.sub = tn('count.track', p.tracks.length); c.coverHtml = playlistCoverHtml(ps);
@@ -687,7 +680,7 @@ function renderPlaylistsGrid() {
   add.innerHTML = `<div class="pl-cover">${ICONS.plusSm}</div><div class="pl-card-name">${t('playlists.new')}</div><div class="pl-card-sub">${t('playlists.create')}</div>`;
   add.addEventListener('click', newPlaylistFlow);
   grid.appendChild(add);
-  $('plEmpty').classList.toggle('hidden', playlists.length > 0);
+  $('plEmpty').classList.toggle('hidden', playlistsStore.playlists.length > 0);
 }
 function newPlaylistFlow() {
   const p = createPlaylist();
@@ -780,7 +773,7 @@ $('ppRename').addEventListener('click', renamePlaylistInline);
 $('ppDelete').addEventListener('click', async () => {
   const p = findPlaylist(currentPlaylistId); if (!p) return;
   if (!(await askConfirm(t('playlists.deleteConfirm', { name: p.name }), { danger: true, confirmLabel: t('common.delete') }))) return;
-  playlists = playlists.filter((x) => x.id !== p.id);
+  playlistsStore.setPlaylists(playlistsStore.playlists.filter((x) => x.id !== p.id));
   await savePlaylists();
   closePlaylistPage();
   openPlaylistsView();
@@ -794,9 +787,9 @@ $('ppExport').addEventListener('click', async () => {
 });
 $('ppSync').addEventListener('click', async () => {
   const p = findPlaylist(currentPlaylistId); if (!p || !p.tracks.length) { toast(t('playlists.empty'), 'error'); return; }
-  if (!activeDevice) { toast(t('playlists.connectDevice'), 'error'); return; }
+  if (!devicesStore.activeDevice) { toast(t('playlists.connectDevice'), 'error'); return; }
   showScanIndicator(t('playlists.syncing'));
-  const res = await window.api.playlistSyncToDevice({ serial: activeDevice.serial, name: p.name, tracks: p.tracks });
+  const res = await window.api.playlistSyncToDevice({ serial: devicesStore.activeDevice.serial, name: p.name, tracks: p.tracks });
   hideScanIndicator();
   if (res && res.error) { toast(res.error, 'error'); return; }
   try { const st = await window.api.deviceSyncState(activeDevice.serial); devicesStore.setSyncedKeys(st.keys || []); renderList(); } catch { /* ok */ }
@@ -809,7 +802,7 @@ $('ppSync').addEventListener('click', async () => {
 // ---- "Adicionar à playlist" (menu de contexto) ----
 function openAddToPlaylistMenu(s, anchorEl) {
   const items = [{ head: t('playlists.addToMenu') }];
-  for (const p of playlists) {
+  for (const p of playlistsStore.playlists) {
     items.push({ icon: ICONS.queue, label: p.name, onClick: () => addToPlaylist(p.id, s.filePath) });
   }
   items.push({ sep: true });
@@ -822,7 +815,7 @@ function openAddToPlaylistMenu(s, anchorEl) {
 
 // View-model do card p/ a ilha Lit (renderer prepara; o componente é view pura).
 function songVM(s) {
-  const synced = hasSyncContext && syncedKeys.has(keyOf(s));
+  const synced = hasSyncContext && devicesStore.syncedKeys.has(keyOf(s));
   return {
     path: s.filePath,
     title: s.title || s.fileName.replace(/\.mp3$/i, ''),
@@ -1815,7 +1808,7 @@ async function saveDetails() {
   maybeResync(); // propaga a edição ao dispositivo, se houver sync ativa
   // mantém o editor aberto e volta para a visualização com os dados atualizados
   if (currentEditorSong) {
-    const updated = songs.find((x) => x.filePath === currentFilePath);
+    const updated = libraryStore.songs.find((x) => x.filePath === currentFilePath);
     if (updated) currentEditorSong = updated;
   }
   // se a faixa editada é a que está tocando, recarrega o karaokê
@@ -1858,7 +1851,7 @@ async function saveDetailsWithSync(lrclibSync) {
 // (#editDone e #deleteBtn são tratados pelo roteador delegado do #editorBackdrop)
 function onDeleteClick() {
   if (!currentFilePath) return;
-  const s = songs.find((x) => x.filePath === currentFilePath)
+  const s = libraryStore.songs.find((x) => x.filePath === currentFilePath)
     || deviceOnlySongs.find((x) => x.filePath === currentFilePath)
     || { filePath: currentFilePath, fileName: $('fileName').textContent, title: $('title').value, artist: $('artist').value };
   hideEditor();
@@ -1885,8 +1878,8 @@ function openDeleteModal(s) {
   $('deleteSong').textContent = `${s.artist ? s.artist + ' — ' : ''}${title}`;
 
   const onPc = !s.deviceOnly;
-  const onDevice = !!s.deviceOnly || !!(activeDevice && syncedKeys.has(keyOf(s)));
-  const nick = activeDevice ? (activeDevice.nickname || activeDevice.label || t('deleteModal.deviceFallback')) : t('deleteModal.deviceFallback');
+  const onDevice = !!s.deviceOnly || !!(devicesStore.activeDevice && devicesStore.syncedKeys.has(keyOf(s)));
+  const nick = devicesStore.activeDevice ? (devicesStore.activeDevice.nickname || devicesStore.activeDevice.label || t('deleteModal.deviceFallback')) : t('deleteModal.deviceFallback');
 
   const opts = $('deleteOptions');
   const btnDevice = opts.querySelector('[data-where="device"]');
@@ -1943,7 +1936,7 @@ $('deleteModal').addEventListener('click', (e) => { if (e.target === $('deleteMo
 async function executeDelete(where) {
   const s = deleteTarget;
   if (!s) { closeDeleteModal(); return; }
-  const serial = activeDevice ? activeDevice.serial : (s.serial || null);
+  const serial = devicesStore.activeDevice ? devicesStore.activeDevice.serial : (s.serial || null);
   let hadError = false;
 
   try {
@@ -1966,8 +1959,8 @@ async function executeDelete(where) {
   // atualiza estado local (faixa device-only some; badges refletem a remoção)
   if (where === 'device' || where === 'both') {
     if (s.deviceOnly) deviceOnlySongs = deviceOnlySongs.filter((x) => x.filePath !== s.filePath);
-    if (activeDevice) {
-      try { const st = await window.api.deviceSyncState(activeDevice.serial); devicesStore.setSyncedKeys(st.keys || []); } catch { /* ok */ }
+    if (devicesStore.activeDevice) {
+      try { const st = await window.api.deviceSyncState(devicesStore.activeDevice.serial); devicesStore.setSyncedKeys(st.keys || []); } catch { /* ok */ }
     }
   }
   await reloadLibrary();
@@ -3575,7 +3568,7 @@ function setDevicesBusy(b) { $('devicesBtn').classList.toggle('syncing', b); }
 // artistas únicos da biblioteca (chave normalizada → nome de exibição)
 function libraryArtists() {
   const m = new Map();
-  for (const s of songs) {
+  for (const s of libraryStore.songs) {
     const k = normPart(s.artist || '');
     if (!m.has(k)) m.set(k, (s.artist || '').trim() || t('library.noArtist'));
   }
@@ -3694,7 +3687,7 @@ window.api.onDeviceAttached(async (info) => {
 });
 
 window.api.onDeviceDetached((info) => {
-  if (activeDevice && activeDevice.serial === info.serial) {
+  if (devicesStore.activeDevice && devicesStore.activeDevice.serial === info.serial) {
     devicesStore.setActiveDevice(null);
     deviceOnlySongs = [];
     // mantém os badges com o último estado conhecido (sync.json)
@@ -3769,9 +3762,9 @@ async function runScanAndSync(info) {
 
 // re-sincroniza em segundo plano quando a biblioteca muda e há dispositivo ativo
 function maybeResync() {
-  if (!activeDevice) return;
+  if (!devicesStore.activeDevice) return;
   runScanAndSync({
-    serial: activeDevice.serial, nickname: activeDevice.nickname, label: activeDevice.label,
+    serial: devicesStore.activeDevice.serial, nickname: devicesStore.activeDevice.nickname, label: devicesStore.activeDevice.label,
     configured: true, syncEnabled: true
   });
 }
