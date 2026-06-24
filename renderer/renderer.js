@@ -3894,6 +3894,12 @@ window.addEventListener('DOMContentLoaded', async () => {
     await i18nReady;
     console.debug('[startup] i18n pronto em', Date.now() - t0, 'ms');
     applyStaticI18n();
+    // As ilhas Lit foram montadas no microtask _litReady (eval do módulo), ANTES do
+    // dicionário chegar (STR vazio) → as que usam t() inline no template renderaram a
+    // shell com as chaves cruas. applyStaticI18n só cobre [data-i18n], não o template
+    // da ilha. Re-renderiza as ilhas com o t já populado.
+    document.querySelectorAll('syn-track-editor, syn-settings, syn-mini-player')
+      .forEach((el) => { if (el.requestUpdate) el.requestUpdate(); });
 
     // a biblioteca é a tela inicial visível: carrega e renderiza primeiro
     console.debug('[startup] carregando biblioteca…');
