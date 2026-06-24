@@ -16,7 +16,7 @@ import { loading, palette, menu, confirm as confirmCap } from './components/capa
 // Store-núcleo (ARCHITECTURE-V2 Fase 3): fonte única do estado central. Por ora só a
 // biblioteca (`songs`); o renderer escreve via libraryStore.setSongs e mantém o global
 // `songs` como ESPELHO (subscribe abaixo) — leitores migram pro store aos poucos.
-import { libraryStore } from './services/core-store.js';
+import { libraryStore, playlistsStore } from './services/core-store.js';
 
 // Substitui o confirm() nativo (síncrono/bloqueante) pela capacidade <syn-confirm> (async).
 function askConfirm(message, opts = {}) {
@@ -602,15 +602,13 @@ $('apBack').addEventListener('click', closeArtistPage);
 $('apPlay').addEventListener('click', () => playList(artistPageSongs));
 
 // ====================== Playlists ======================
-let playlists = [];
+let playlists = [];       // ESPELHO de playlistsStore.playlists (fonte única; core-store.js)
+playlistsStore.subscribe('playlists', (arr) => { playlists = arr; });
 let currentPlaylistId = null;
 let plDragFrom = -1;
 
-async function loadPlaylists() {
-  try { const cfg = await window.api.getConfig(); playlists = Array.isArray(cfg.playlists) ? cfg.playlists : []; }
-  catch { playlists = []; }
-}
-async function savePlaylists() { try { await window.api.setConfig({ playlists }); } catch { /* ok */ } }
+async function loadPlaylists() { await playlistsStore.load(); }
+async function savePlaylists() { await playlistsStore.save(); }
 function findPlaylist(id) { return playlists.find((p) => p.id === id); }
 function playlistSongs(p) {
   const byPath = new Map(songs.map((s) => [s.filePath, s]));

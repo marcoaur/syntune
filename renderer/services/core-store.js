@@ -10,9 +10,13 @@
 // como ESPELHO no início; os leitores migram pro store subsistema a subsistema.
 import { ApiService } from './api-service.js';
 import { LibraryService } from './library-service.js';
+import { PlaylistsService } from './playlists-service.js';
 
 /** Ponte IPC única (pass-through tipado). */
 export const coreApi = new ApiService();
 
 /** Biblioteca: fonte única de `songs`. Assinatura granular via subscribe('songs', fn). */
 export const libraryStore = new LibraryService(coreApi);
+
+/** Playlists: fonte única de `playlists`. subscribe('playlists', fn). */
+export const playlistsStore = new PlaylistsService(coreApi);
