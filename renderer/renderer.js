@@ -719,7 +719,7 @@ function openPlaylistPage(id) {
 
   $('playlistPage').classList.remove('hidden', 'closing');
   $('playlistPage').querySelector('.ap-scroll').scrollTop = 0;
-  markPlayingCards();
+  emitIntent('syn:player:mark-cards');
 }
 function closePlaylistPage() { closeViewAnimated($('playlistPage')); currentPlaylistId = null; }
 
@@ -769,7 +769,7 @@ function renamePlaylistInline() {
 }
 
 $('ppBack').addEventListener('click', () => { closePlaylistPage(); openPlaylistsView(); });
-$('ppPlay').addEventListener('click', () => { const p = findPlaylist(currentPlaylistId); if (p) playList(playlistSongs(p)); });
+$('ppPlay').addEventListener('click', () => { const p = findPlaylist(currentPlaylistId); if (p) emitIntent('syn:player:play-list', { songs: playlistSongs(p) }); });
 $('ppRename').addEventListener('click', renamePlaylistInline);
 $('ppDelete').addEventListener('click', async () => {
   const p = findPlaylist(currentPlaylistId); if (!p) return;
@@ -793,7 +793,7 @@ $('ppSync').addEventListener('click', async () => {
   const res = await window.api.playlistSyncToDevice({ serial: devicesStore.activeDevice.serial, name: p.name, tracks: p.tracks });
   hideScanIndicator();
   if (res && res.error) { toast(res.error, 'error'); return; }
-  try { const st = await window.api.deviceSyncState(devicesStore.activeDevice.serial); devicesStore.setSyncedKeys(st.keys || []); renderList(); } catch { /* ok */ }
+  try { const st = await window.api.deviceSyncState(devicesStore.activeDevice.serial); devicesStore.setSyncedKeys(st.keys || []); emitIntent('syn:library:refresh'); } catch { /* ok */ }
   toast(t('playlists.syncResult', {
     count: res.count,
     copied: res.copied ? t('playlists.syncCopied', { n: res.copied }) : ''
@@ -837,6 +837,17 @@ function wireSongCardDelegation() {
   });
 }
 wireSongCardDelegation();
+
+// Intents de EFEITO cross-subsistema (ARCHITECTURE-V2): uma view emite (evento bubbles →
+// document) e o renderer, dono do player/biblioteca, executa. Desacopla as views das
+// funções do renderer — a view não chama playList/renderList direto, emite a intenção.
+function emitIntent(name, detail) { document.dispatchEvent(new CustomEvent(name, { detail })); }
+function wireViewIntents() {
+  document.addEventListener('syn:player:play-list', (e) => playList((e.detail && e.detail.songs) || []));
+  document.addEventListener('syn:player:mark-cards', () => markPlayingCards());
+  document.addEventListener('syn:library:refresh', () => renderList());
+}
+wireViewIntents();
 
 function buildPendingCard(job) {
   const card = document.createElement('div');
