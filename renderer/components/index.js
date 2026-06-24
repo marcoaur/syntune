@@ -19,6 +19,7 @@ export { SynEq } from './panel/syn-eq.js';
 export { SynCropper } from './panel/syn-cropper.js';
 export { SynToast } from './panel/syn-toast.js';
 export { SynDevice } from './device/syn-device.js';
+export { SynDevices } from './device/syn-devices.js';
 export { SynPlaylistCard } from './playlist/syn-playlist-card.js';
 export { SynPlaylists } from './playlist/syn-playlists.js';
 export { SynSongCard } from './song/syn-song-card.js';

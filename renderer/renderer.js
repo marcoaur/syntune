@@ -1,6 +1,6 @@
 // ===================== Módulos puros (ESM) =====================
 // Helpers sem estado, extraídos do monolito. Ver renderer/modules/*.js e AGENTS.md.
-import { normPart, keyOf, normalizeText, artistInitials, cssEsc, fmtBytes, fmtDb } from './modules/format.js';
+import { normPart, keyOf, normalizeText, artistInitials, fmtDb } from './modules/format.js';
 import { rgbToHsl, hslToRgb, deriveBarColors, lerpPal } from './modules/color.js';
 import { isSyncedLyrics, parseLrc, lrcToPlain, parseLrcTime, fmtTimestamp, parseLrcSeconds, parseLyricsToLines, serializeLines } from './modules/lrc.js';
 import { LYRICS_STATUS, EQ_BANDS, EQ_BUILTINS } from './modules/constants.js';
@@ -63,7 +63,6 @@ let pendingJobs = [];    // downloads/enriquecimentos em andamento (transientes)
 // Sincronização com dispositivo
 // activeDevice/syncedKeys vivem em devicesStore (fonte única; core-store.js).
 // Leitura: devicesStore.activeDevice / devicesStore.syncedKeys; escrita via setX.
-let showingIgnored = false;     // sheet de dispositivos: lista de ignorados visível?
 
 // Busca / agrupamento
 let searchQuery = '';
@@ -2994,7 +2993,7 @@ document.addEventListener('keydown', (e) => {
       } else hideEditor();
       return;
     }
-    if (vis('devicesModal')) { closeDevices(); return; }
+    if (vis('devicesModal')) { synDevices.close(); return; }
     if (vis('settingsModal')) { closeViewAnimated($('settingsModal')); return; }
     if (!$('eqPanel').classList.contains('hidden')) { $('eqPanel').classList.add('hidden'); return; }
     if (!$('queuePanel').classList.contains('hidden')) { $('queuePanel').classList.add('hidden'); return; }
@@ -3337,7 +3336,6 @@ $('groupToggle').addEventListener('click', () => {
 })();
 
 // ====================== Dispositivos / sincronização ======================
-let lastAttachedSerial = null; // último dispositivo que disparou a notificação
 
 // Status de loading na barra de ferramentas (sempre visível): prioriza
 // downloads/enriquecimento em andamento; senão, mostra a varredura/sync do dispositivo.
@@ -3357,313 +3355,16 @@ function refreshToolbarStatus() {
 function showScanIndicator(msg) { syncStatusMsg = msg || t('sync.scanning'); refreshToolbarStatus(); }
 function hideScanIndicator() { syncStatusMsg = null; refreshToolbarStatus(); }
 
-// ---- Central de sincronização: estado e helpers ----
-const deviceStats = {};      // serial -> { pendingCount, pendingBytes }
-const deviceConnInfo = {};   // serial -> { free, size, connected }
-
-function setDevicesBusy(b) { $('devicesBtn').classList.toggle('syncing', b); }
-
-
-// artistas únicos da biblioteca (chave normalizada → nome de exibição)
-function libraryArtists() {
-  const m = new Map();
-  for (const s of libraryStore.songs) {
-    const k = normPart(s.artist || '');
-    if (!m.has(k)) m.set(k, (s.artist || '').trim() || t('library.noArtist'));
-  }
-  return [...m.entries()].sort((a, b) => a[1].localeCompare(b[1], t('meta.locale')));
+// ---- Central de dispositivos = ilha <syn-devices> (dona da lista/sync/notice/contexto) ----
+// Estado nos stores; efeito cross-subsistema = intent syn:library:refresh. O renderer injeta
+// glue/UI e aciona por métodos públicos (open/close/resync/initContext).
+const synDevices = document.querySelector('syn-devices');
+if (synDevices) {
+  Object.assign(synDevices, { t, tn, toast, closeView: (el) => closeViewAnimated(el), showScanIndicator, hideScanIndicator });
 }
-
-// barra de capacidade do dispositivo (usado / a sincronizar / livre)
-function paintCapacity(el, info, stats) {
-  const size = info.size || 0, free = info.free || 0;
-  const used = Math.max(0, size - free);
-  const pend = stats ? (stats.pendingBytes || 0) : null;
-  const usedPct = size ? (used / size) * 100 : 0;
-  const pendPct = size ? (Math.min(pend || 0, free) / size) * 100 : 0;
-
-  el.innerHTML = '';
-  const bar = document.createElement('div');
-  bar.className = 'cap-bar';
-  const u = document.createElement('div'); u.className = 'cap-used'; u.style.width = usedPct + '%';
-  const p = document.createElement('div'); p.className = 'cap-pending'; p.style.width = pendPct + '%';
-  bar.append(u, p);
-
-  const label = document.createElement('div');
-  label.className = 'cap-label';
-  let txt = t('devices.freeOf', { free: fmtBytes(free), size: fmtBytes(size) });
-  if (pend == null) txt += t('devices.calculating');
-  else if (pend > 0) txt += t('devices.missing', { bytes: fmtBytes(pend) }) +
-    (stats.pendingCount ? t('devices.missingTracks', { tracks: tn('count.track', stats.pendingCount) }) : '');
-  else txt += t('devices.upToDateCap');
-  label.textContent = txt;
-  if (pend != null && pend > free) label.classList.add('warn-text');
-
-  el.append(bar, label);
-}
-function paintCapacityRow(serial) {
-  const row = document.querySelector(`.device-row[data-serial="${cssEsc(serial)}"]`);
-  if (!row) return;
-  const cap = row.querySelector('.device-capacity');
-  if (cap) paintCapacity(cap, deviceConnInfo[serial] || {}, deviceStats[serial]);
-}
-
-// progresso inline (na sheet) durante a sincronização de um dispositivo
-function updateDeviceRowProgress(serial, p) {
-  const row = document.querySelector(`.device-row[data-serial="${cssEsc(serial)}"]`);
-  if (!row) return;
-  const prog = row.querySelector('.device-progress');
-  if (!prog) return;
-  prog.classList.remove('hidden', 'closing');
-  const bar = prog.querySelector('.dp-bar > div');
-  const txt = prog.querySelector('.dp-text');
-  if (p.phase === 'sync') {
-    if (bar) bar.style.width = (p.percent || 0) + '%';
-    if (txt) txt.textContent = p.current ? t('sync.syncingCur', { done: p.done, total: p.total, current: p.current }) : t('sync.syncing');
-  } else {
-    if (bar) bar.style.width = '100%';
-    // ignora o texto vindo do worker (não traduzido): monta a mensagem aqui
-    if (txt) txt.textContent = (p.total != null && p.done != null)
-      ? t('sync.syncingN', { done: p.done, total: p.total })
-      : t('sync.scanning');
-  }
-}
-function hideDeviceRowProgress(serial) {
-  const row = document.querySelector(`.device-row[data-serial="${cssEsc(serial)}"]`);
-  if (row) { const prog = row.querySelector('.device-progress'); if (prog) prog.classList.add('hidden'); }
-}
-
-// recalcula o "quanto falta" de um dispositivo conectado (sem copiar nada)
-async function refreshDeviceStats(serial) {
-  if (syncBusy) return; // não concorre com o fluxo principal
-  const info = deviceConnInfo[serial];
-  if (!info || !info.connected) return;
-  try {
-    const scan = await window.api.deviceScan(serial);
-    if (scan && !scan.error) {
-      deviceStats[serial] = { pendingCount: scan.pendingCount, pendingBytes: scan.pendingBytes || 0 };
-      paintCapacityRow(serial);
-    }
-  } finally { hideDeviceRowProgress(serial); }
-}
-
-async function persistScope(serial, scope) {
-  await window.api.devicesUpdate({
-    serial,
-    syncScope: scope.mode === 'artists' ? { mode: 'artists', artists: scope.artists } : { mode: 'all' }
-  });
-}
-
-// ---- Notificação de dispositivo conectado ----
-function showDeviceNotice(info) {
-  lastAttachedSerial = info.serial;
-  const label = info.label || info.model || t('devices.storage');
-  $('deviceNoticeSub').textContent = t('deviceNotice.subLabel', { label });
-  $('deviceNotice').classList.remove('hidden', 'closing');
-}
-function hideDeviceNotice() { $('deviceNotice').classList.add('hidden'); }
-
-$('deviceNotice').addEventListener('click', (e) => {
-  if (e.target === $('deviceNoticeClose')) return;
-  hideDeviceNotice();
-  openDevices();
-});
-$('deviceNoticeClose').addEventListener('click', (e) => {
-  e.stopPropagation();
-  hideDeviceNotice();
-});
-
-// ---- Eventos de conexão/desconexão ----
-window.api.onDeviceAttached(async (info) => {
-  if (info.ignored) return; // dispositivo ignorado: não mostra nada
-  if (info.configured && info.syncEnabled) {
-    // conhecido e com sync ligada → varre e sincroniza
-    await runScanAndSync(info);
-  } else {
-    // novo / não configurado → notifica para o usuário configurar
-    showDeviceNotice(info);
-  }
-});
-
-window.api.onDeviceDetached((info) => {
-  if (devicesStore.activeDevice && devicesStore.activeDevice.serial === info.serial) {
-    devicesStore.setActiveDevice(null);
-    devicesStore.setDeviceOnlySongs([]);
-    // mantém os badges com o último estado conhecido (sync.json)
-    renderList();
-  }
-  if (lastAttachedSerial === info.serial) hideDeviceNotice();
-  // atualiza a sheet se estiver aberta
-  if (!$('devicesModal').classList.contains('hidden')) renderDevices();
-});
-
-window.api.onSyncProgress((p) => {
-  // badge persistente no cabeçalho só durante o fluxo principal de sync
-  if (syncBusy) {
-    if (p.phase === 'sync') {
-      showScanIndicator(p.total ? t('sync.syncingN', { done: p.done, total: p.total }) : t('sync.syncing'));
-    } else {
-      showScanIndicator(t('sync.scanning'));
-    }
-  }
-  // progresso inline (com nome do arquivo) na sheet de dispositivos
-  updateDeviceRowProgress(p.serial, p);
-});
-
-// ---- Fluxo: varredura → sincronização ----
-// A cópia roda em um worker no processo principal (não trava a UI). Aqui apenas
-// coordenamos: chamadas concorrentes são coalescidas (a última fica pendente).
-let syncBusy = false;
-let syncQueued = null;
-async function runScanAndSync(info) {
-  if (syncBusy) { syncQueued = info; return; } // já há uma sincronização em curso
-  syncBusy = true;
-  setDevicesBusy(true);
-  devicesStore.setActiveDevice({ serial: info.serial, nickname: info.nickname, label: info.label });
-  showScanIndicator(t('sync.scanning'));
-  try {
-    const scan = await window.api.deviceScan(info.serial);
-    if (scan && scan.error) { toast(scan.error, 'error'); return; }
-    if (Array.isArray(scan.syncedKeys)) devicesStore.setSyncedKeys(scan.syncedKeys);
-    devicesStore.setHasSyncContext(true);
-    devicesStore.setDeviceOnlySongs(scan.deviceOnly || []);
-    deviceStats[info.serial] = { pendingCount: scan.pendingCount, pendingBytes: scan.pendingBytes || 0 };
-    paintCapacityRow(info.serial);
-    renderList();
-
-    showScanIndicator(scan.pendingCount ? t('sync.syncingN', { done: 0, total: scan.pendingCount }) : t('sync.syncing'));
-    const res = await window.api.deviceSync(info.serial);
-    if (res && res.error) { toast(res.error, 'error'); return; }
-    if (res && res.queued) return; // outra sincronização assumiu; sem toast
-
-    if (Array.isArray(res.syncedKeys)) devicesStore.setSyncedKeys(res.syncedKeys);
-    deviceStats[info.serial] = { pendingCount: res.failed || 0, pendingBytes: 0 };
-    paintCapacityRow(info.serial);
-    renderList();
-
-    const nick = info.nickname || info.label || t('deleteModal.deviceFallback');
-    if (res.copied > 0) {
-      toast(t('sync.copied', { n: res.copied, nick }), 'success');
-    } else {
-      toast(t('sync.upToDate', { nick }), 'success');
-    }
-    if (res.failed > 0) toast(t('sync.failedN', { n: res.failed }), 'error');
-  } catch (err) {
-    toast(t('sync.fail', { msg: (err && err.message ? err.message : err) }), 'error');
-  } finally {
-    syncBusy = false;
-    setDevicesBusy(false);
-    hideScanIndicator();
-    hideDeviceRowProgress(info.serial);
-    if (syncQueued) { const next = syncQueued; syncQueued = null; runScanAndSync(next); }
-  }
-}
-
-// re-sincroniza em segundo plano quando a biblioteca muda e há dispositivo ativo
-function maybeResync() {
-  if (!devicesStore.activeDevice) return;
-  runScanAndSync({
-    serial: devicesStore.activeDevice.serial, nickname: devicesStore.activeDevice.nickname, label: devicesStore.activeDevice.label,
-    configured: true, syncEnabled: true
-  });
-}
-
-// ---- Sheet de dispositivos ----
-async function openDevices() {
-  showingIgnored = false;
-  $('devicesModal').classList.remove('hidden', 'closing');
-  await renderDevices();
-}
-function closeDevices() { closeViewAnimated($('devicesModal')); }
-
-$('devicesBtn').addEventListener('click', openDevices);
-$('closeDevices').addEventListener('click', closeDevices);
-$('devicesModal').addEventListener('click', (e) => {
-  if (e.target === $('devicesModal')) closeDevices();
-});
-$('toggleIgnored').addEventListener('click', () => {
-  showingIgnored = !showingIgnored;
-  $('toggleIgnored').textContent = showingIgnored ? t('devices.hideIgnored') : t('devices.showIgnored');
-  $('ignoredList').classList.toggle('hidden', !showingIgnored);
-});
-
-// Linha de dispositivo = ilha Lit <syn-device> (light-DOM). O host vira .device-row[data-serial]
-// → CSS global + helpers por-serial (capacidade/progresso) seguem valendo.
-function buildDeviceEl(d) {
-  deviceConnInfo[d.serial] = { free: d.free, size: d.size, connected: d.connected };
-  const el = document.createElement('syn-device');
-  el.device = d;
-  el.stats = deviceStats[d.serial] || null;
-  el.artists = libraryArtists();
-  el.t = t; el.tn = tn;
-  return el;
-}
-
-// Intents do syn-device → orquestração existente. Delegado no modal (eventos bubbles+composed).
-let _devIntentsWired = false;
-function wireDeviceIntents() {
-  if (_devIntentsWired) return;
-  _devIntentsWired = true;
-  const modal = $('devicesModal');
-  modal.addEventListener('syn:device:nick', (e) => window.api.devicesUpdate({ serial: e.detail.serial, nickname: e.detail.nickname }));
-  modal.addEventListener('syn:device:sync-toggle', async (e) => {
-    const { serial, enabled, connected, nickname, label } = e.detail;
-    await window.api.devicesUpdate({ serial, syncEnabled: enabled });
-    await renderDevices();
-    if (enabled && connected) runScanAndSync({ serial, nickname, label, configured: true, syncEnabled: true });
-    else if (!enabled && devicesStore.activeDevice && devicesStore.activeDevice.serial === serial) { devicesStore.setActiveDevice(null); devicesStore.setDeviceOnlySongs([]); renderList(); }
-  });
-  modal.addEventListener('syn:device:scope', (e) => { persistScope(e.detail.serial, e.detail.scope); refreshDeviceStats(e.detail.serial); });
-  modal.addEventListener('syn:device:ignore', async (e) => { await window.api.devicesUpdate({ serial: e.detail.serial, ignored: e.detail.ignored }); await renderDevices(); });
-  modal.addEventListener('syn:device:sync-now', (e) => runScanAndSync({ serial: e.detail.serial, nickname: e.detail.nickname, label: e.detail.label, configured: true, syncEnabled: true }));
-}
-
-async function renderDevices() {
-  wireDeviceIntents();
-  const res = await window.api.devicesList();
-  const devices = (res && res.devices) || [];
-  const active = devices.filter((d) => !d.ignored);
-  const ignored = devices.filter((d) => d.ignored);
-
-  const list = $('deviceList');
-  list.innerHTML = '';
-  // conectados primeiro, depois por apelido/rótulo
-  active.sort((a, b) => (b.connected - a.connected) ||
-    (a.nickname || a.label || '').localeCompare(b.nickname || b.label || '', t('meta.locale')));
-  for (const d of active) list.appendChild(buildDeviceEl(d));
-
-  $('deviceEmpty').classList.toggle('hidden', active.length > 0 || ignored.length > 0);
-
-  const igList = $('ignoredList');
-  igList.innerHTML = '';
-  for (const d of ignored) igList.appendChild(buildDeviceEl(d));
-  $('toggleIgnored').classList.toggle('hidden', ignored.length === 0);
-  $('toggleIgnored').textContent = showingIgnored ? t('devices.hideIgnored') : t('devices.showIgnored');
-  igList.classList.toggle('hidden', !showingIgnored);
-
-  // calcula "quanto falta" p/ dispositivos conectados+sync sem dados em cache
-  for (const d of active) {
-    if (d.connected && d.syncEnabled && !deviceStats[d.serial]) refreshDeviceStats(d.serial);
-  }
-}
-
-// Restaura o contexto de badges no início (último dispositivo configurado/conectado)
-async function initSyncContext() {
-  try {
-    const res = await window.api.devicesList();
-    const devices = (res && res.devices) || [];
-    if (!devices.length) return;
-    // prioriza o conectado; senão, um já configurado
-    const ref = devices.find((d) => d.connected && d.configured) ||
-      devices.find((d) => d.configured) || null;
-    if (!ref) return;
-    const st = await window.api.deviceSyncState(ref.serial);
-    devicesStore.setSyncedKeys((st && st.keys) || []);
-    devicesStore.setHasSyncContext(true);
-    if (ref.connected) devicesStore.setActiveDevice({ serial: ref.serial, nickname: ref.nickname, label: ref.label });
-    renderList();
-  } catch { /* sem contexto */ }
-}
+$('devicesBtn').addEventListener('click', () => { if (synDevices) synDevices.open(); });
+// re-sincroniza em 2º plano quando a biblioteca muda e há device ativo
+function maybeResync() { if (synDevices) synDevices.resync(); }
 
 // ====================== Início ======================
 // remove o splash inicial assim que a tela principal foi pintada
@@ -3711,7 +3412,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   }
 
   // o restante da inicialização não bloqueia a exibição da tela inicial
-  Promise.all([playlistsStore.load(), initSyncContext(), initEq()]).catch(() => {});
+  Promise.all([playlistsStore.load(), synDevices ? synDevices.initContext() : null, initEq()]).catch(() => {});
   window.api.getConfig().then((cfg) => {
     if (cfg) advancedEdit = cfg.advancedEdit === true;
     if (cfg && !cfg.apiKey) {
