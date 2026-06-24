@@ -792,7 +792,7 @@ $('ppSync').addEventListener('click', async () => {
   const res = await window.api.playlistSyncToDevice({ serial: devicesStore.activeDevice.serial, name: p.name, tracks: p.tracks });
   hideScanIndicator();
   if (res && res.error) { toast(res.error, 'error'); return; }
-  try { const st = await window.api.deviceSyncState(activeDevice.serial); devicesStore.setSyncedKeys(st.keys || []); renderList(); } catch { /* ok */ }
+  try { const st = await window.api.deviceSyncState(devicesStore.activeDevice.serial); devicesStore.setSyncedKeys(st.keys || []); renderList(); } catch { /* ok */ }
   toast(t('playlists.syncResult', {
     count: res.count,
     copied: res.copied ? t('playlists.syncCopied', { n: res.copied }) : ''
@@ -3812,7 +3812,7 @@ function wireDeviceIntents() {
     await window.api.devicesUpdate({ serial, syncEnabled: enabled });
     await renderDevices();
     if (enabled && connected) runScanAndSync({ serial, nickname, label, configured: true, syncEnabled: true });
-    else if (!enabled && activeDevice && activeDevice.serial === serial) { devicesStore.setActiveDevice(null); deviceOnlySongs = []; renderList(); }
+    else if (!enabled && devicesStore.activeDevice && devicesStore.activeDevice.serial === serial) { devicesStore.setActiveDevice(null); deviceOnlySongs = []; renderList(); }
   });
   modal.addEventListener('syn:device:scope', (e) => { persistScope(e.detail.serial, e.detail.scope); refreshDeviceStats(e.detail.serial); });
   modal.addEventListener('syn:device:ignore', async (e) => { await window.api.devicesUpdate({ serial: e.detail.serial, ignored: e.detail.ignored }); await renderDevices(); });
