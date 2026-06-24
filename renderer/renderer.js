@@ -13,6 +13,8 @@ import { ICONS } from './modules/icons.js';
 import './components/index.js';
 // Capacidades headless (ARCHITECTURE-V2): acionáveis por qualquer um (toast-like).
 import { loading, palette, menu, confirm as confirmCap } from './components/capabilities.js';
+// Folha compartilhada do card de faixa (factory pura + delegação no renderer).
+import { buildSongCard, configureSongCard } from './components/song/build-song-card.js';
 // Store-núcleo (ARCHITECTURE-V2 Fase 3): fonte única do estado central. O renderer lê/
 // escreve direto nos stores (libraryStore.songs/setSongs etc.); os mesmos singletons são
 // providos via context pelo <syn-app-root> p/ os componentes consumirem.
@@ -812,41 +814,29 @@ function openAddToPlaylistMenu(s, anchorEl) {
   menu().open(anchorEl, items);
 }
 
-// View-model do card p/ a ilha Lit (renderer prepara; o componente é view pura).
-function songVM(s) {
-  const synced = devicesStore.hasSyncContext && devicesStore.syncedKeys.has(keyOf(s));
-  return {
-    path: s.filePath,
-    title: s.title || s.fileName.replace(/\.mp3$/i, ''),
-    sub: songSubtitle(s),
-    src: coverUrl(s),
-    coverKnown: coverState.get(s.filePath),
-    deviceOnly: !!s.deviceOnly,
-    badge: s.deviceOnly
-      ? { kind: 'device', label: t('badges.onDevice'), title: t('badges.onDeviceTitle') }
-      : (devicesStore.hasSyncContext ? { kind: 'sync', synced, label: synced ? t('badges.syncedTitle') : t('badges.notSyncedTitle') } : null),
-  };
-}
-// Card Lit (light-DOM): mesma classe/data-path → CSS + querySelectors do renderer seguem.
-// Os intents reusam a orquestração existente com o closure (s, queueList).
-function buildSongCardLit(s, queueList) {
-  const el = document.createElement('syn-song-card');
-  el.vm = songVM(s);
-  el.t = t;
-  el.addEventListener('syn:song:play', () => {
+// O card de faixa é a folha compartilhada buildSongCard (components/song/build-song-card.js):
+// factory pura dirigida por VM. As ações (play/menu/cover) sobem como intents (eventos
+// bubbles) e são tratadas aqui por DELEGAÇÃO única no document — a folha não conhece o
+// renderer. Injeta-se 1x t/coverUrl/coverState/songSubtitle (singletons app-global).
+configureSongCard({ t, coverUrl, coverState, songSubtitle });
+function wireSongCardDelegation() {
+  document.addEventListener('syn:song:play', (e) => {
+    const el = e.target.closest && e.target.closest('syn-song-card'); if (!el || !el._song) return;
+    const s = el._song;
     if (current && current.filePath === s.filePath) togglePlay();
-    else { spawnPlayBurst(el); playFromCard(s, queueList); if (isDemoTrack(s)) revealDemoImmersive(); }
+    else { spawnPlayBurst(el); playFromCard(s, el._queue); if (isDemoTrack(s)) revealDemoImmersive(); }
   });
-  el.addEventListener('syn:song:menu', () => openSongMenu(s, el.querySelector('.song-menu')));
-  el.addEventListener('syn:song:cover', (e) => { coverState.set(s.filePath, e.detail.ok); if (e.detail.ok) applyPalette(el, e.detail.src); });
-  if (current && current.filePath === s.filePath) { el.classList.add('playing'); if (!isPlaying) el.classList.add('paused'); }
-  return el;
+  document.addEventListener('syn:song:menu', (e) => {
+    const el = e.target.closest && e.target.closest('syn-song-card'); if (!el || !el._song) return;
+    openSongMenu(el._song, el.querySelector('.song-menu'));
+  });
+  document.addEventListener('syn:song:cover', (e) => {
+    const el = e.target.closest && e.target.closest('syn-song-card'); if (!el || !el._song) return;
+    coverState.set(el._song.filePath, e.detail.ok);
+    if (e.detail.ok) applyPalette(el, e.detail.src);
+  });
 }
-
-// Card de faixa = ilha Lit <syn-song-card> (dirigida por VM; capa/badges/intents internos).
-function buildSongCard(s, queueList) {
-  return buildSongCardLit(s, queueList);
-}
+wireSongCardDelegation();
 
 function buildPendingCard(job) {
   const card = document.createElement('div');
