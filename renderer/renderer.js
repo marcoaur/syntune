@@ -1050,7 +1050,21 @@ document.addEventListener('syn:np:lyrics-toggle', (e) => {
 });
 document.addEventListener('syn:np:chords-action', () => {
   if (npChordsDirty) { saveChordsInline(); return; }
-  npShowChords = !npShowChords;
+  if (npShowChords) {
+    // DESATIVANDO: anima a saída dos <syn-chord-line> (.chords-leaving) e só então re-renderiza
+    // sem eles — o re-render sozinho os removeria seco (sem fade-out).
+    const box = $('npLyrics');
+    if (box) {
+      box.classList.add('chords-leaving');
+      setTimeout(() => {
+        box.classList.remove('chords-leaving');
+        npShowChords = false; renderNpLyrics();
+        npLastCenter = null; npLyricCurTop = null; updateKaraoke(audio.currentTime);
+      }, 450);
+      return;
+    }
+  }
+  npShowChords = !npShowChords; // ATIVANDO (fade-in via CSS) ou fallback sem o box
   renderNpLyrics();
   npLastCenter = null; npLyricCurTop = null; updateKaraoke(audio.currentTime);
 });

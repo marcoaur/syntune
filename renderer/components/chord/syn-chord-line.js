@@ -55,17 +55,20 @@ export class SynChordLine extends ContainerMixin(SyntuneElement) {
         width: 100%; max-width: 760px; margin: 0 auto;
       }
       /* varredura/cabeça entram e saem por opacidade (transição) quando a linha (des)ativa;
-         a LARGURA/posição é imperativa por frame. Espelha o fade do karaokê legado. */
+         a LARGURA/posição é imperativa por frame. Espelha o fade do karaokê legado.
+         opacity:0 de base: só o rAF revela (active=1) na linha em execução — sem isto a base
+         pintaria a barra/ponto visível por 1 frame em TODAS as linhas recém-criadas (o ponto
+         aparecia nas linhas de baixo antes dos acordes). */
       .sweep {
         position: absolute; left: 0; bottom: 1px; height: 2px; width: 0; border-radius: 2px;
         background: linear-gradient(90deg, rgba(var(--syn-accent), 0), rgba(var(--syn-accent), .55));
-        opacity: 1; transition: opacity .25s ease;
+        opacity: 0; transition: opacity .25s ease;
       }
       .head {
         position: absolute; bottom: 0; width: 5px; height: 5px; border-radius: 50%;
         transform: translateX(-50%); background: rgb(var(--syn-accent));
         box-shadow: 0 0 8px 2px rgba(var(--syn-accent), .75);
-        opacity: 1; transition: opacity .25s ease;
+        opacity: 0; transition: opacity .25s ease;
       }
     `,
   ];
