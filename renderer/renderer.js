@@ -61,7 +61,6 @@ let pendingJobs = [];    // downloads/enriquecimentos em andamento (transientes)
 // Sincronização com dispositivo
 // activeDevice/syncedKeys vivem em devicesStore (fonte única; core-store.js).
 // Leitura: devicesStore.activeDevice / devicesStore.syncedKeys; escrita via setX.
-let hasSyncContext = false;     // há um dispositivo de referência p/ exibir badges de sync?
 let deviceOnlySongs = [];       // faixas que só existem no dispositivo (entram na lista)
 let showingIgnored = false;     // sheet de dispositivos: lista de ignorados visível?
 
@@ -815,7 +814,7 @@ function openAddToPlaylistMenu(s, anchorEl) {
 
 // View-model do card p/ a ilha Lit (renderer prepara; o componente é view pura).
 function songVM(s) {
-  const synced = hasSyncContext && devicesStore.syncedKeys.has(keyOf(s));
+  const synced = devicesStore.hasSyncContext && devicesStore.syncedKeys.has(keyOf(s));
   return {
     path: s.filePath,
     title: s.title || s.fileName.replace(/\.mp3$/i, ''),
@@ -825,7 +824,7 @@ function songVM(s) {
     deviceOnly: !!s.deviceOnly,
     badge: s.deviceOnly
       ? { kind: 'device', label: t('badges.onDevice'), title: t('badges.onDeviceTitle') }
-      : (hasSyncContext ? { kind: 'sync', synced, label: synced ? t('badges.syncedTitle') : t('badges.notSyncedTitle') } : null),
+      : (devicesStore.hasSyncContext ? { kind: 'sync', synced, label: synced ? t('badges.syncedTitle') : t('badges.notSyncedTitle') } : null),
   };
 }
 // Card Lit (light-DOM): mesma classe/data-path → CSS + querySelectors do renderer seguem.
@@ -3726,7 +3725,7 @@ async function runScanAndSync(info) {
     const scan = await window.api.deviceScan(info.serial);
     if (scan && scan.error) { toast(scan.error, 'error'); return; }
     if (Array.isArray(scan.syncedKeys)) devicesStore.setSyncedKeys(scan.syncedKeys);
-    hasSyncContext = true;
+    devicesStore.setHasSyncContext(true);
     deviceOnlySongs = scan.deviceOnly || [];
     deviceStats[info.serial] = { pendingCount: scan.pendingCount, pendingBytes: scan.pendingBytes || 0 };
     paintCapacityRow(info.serial);
@@ -3860,7 +3859,7 @@ async function initSyncContext() {
     if (!ref) return;
     const st = await window.api.deviceSyncState(ref.serial);
     devicesStore.setSyncedKeys((st && st.keys) || []);
-    hasSyncContext = true;
+    devicesStore.setHasSyncContext(true);
     if (ref.connected) devicesStore.setActiveDevice({ serial: ref.serial, nickname: ref.nickname, label: ref.label });
     renderList();
   } catch { /* sem contexto */ }

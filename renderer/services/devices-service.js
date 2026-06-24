@@ -11,8 +11,11 @@ export class DevicesService extends StoreService {
     this.api = api;
     /** @type {object|null} */ this.activeDevice = null;
     /** @type {Set<string>} */ this.syncedKeys = new Set();
+    /** há um dispositivo de referência → exibir badges de sync na biblioteca? */
+    this.hasSyncContext = false;
   }
   setActiveDevice(d) { this.set('activeDevice', d || null); }
   /** Aceita Set ou array de keys → normaliza p/ Set. */
   setSyncedKeys(keys) { this.set('syncedKeys', keys instanceof Set ? keys : new Set(keys || [])); }
+  setHasSyncContext(v) { this.set('hasSyncContext', !!v); }
 }
