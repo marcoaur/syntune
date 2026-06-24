@@ -30,6 +30,7 @@ export { SynQueueItem } from './queue/syn-queue-item.js';
 export { SynQueue } from './queue/syn-queue.js';
 export { SynAudio } from './audio/syn-audio.js';
 export { SynMiniPlayer } from './player/syn-mini-player.js';
+export { SynNowPlaying } from './now-playing/syn-now-playing.js';
 export { SynVisualizer } from './visualizer/syn-visualizer.js';
 export { SynLyrics } from './lyrics/syn-lyrics.js';
 export { SynLyricsEditor } from './lyrics/syn-lyrics-editor.js';

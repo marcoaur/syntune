@@ -456,8 +456,8 @@ $('settingsBtn').addEventListener('click', () => { if (synSettings) synSettings.
 document.addEventListener('syn:settings:saved', (e) => {
   const d = e.detail || {};
   advancedEdit = d.advancedEdit;
-  if (npOpen()) {
-    if ($('nowPlaying').classList.contains('lyrics-mode')) renderNpLyrics(); // aplica/remove gutters
+  if (synNowPlaying.isOpen()) {
+    if (synNowPlaying.isLyricsMode()) renderNpLyrics(); // aplica/remove gutters
     updateChordsBtn();
   }
   if (d.geniusChanged && synLibrary) synLibrary.clearArtistCache();
@@ -868,7 +868,7 @@ audio.addEventListener('timeupdate', () => {
     $('npCur').textContent = t;
     updateDurLabel();
     rangeFill($('npSeek'));
-    if (npOpen() && $('nowPlaying').classList.contains('lyrics-mode')) updateKaraoke(audio.currentTime);
+    if (synNowPlaying.isOpen() && synNowPlaying.isLyricsMode()) updateKaraoke(audio.currentTime);
   }
 });
 audio.addEventListener('loadedmetadata', () => {
@@ -929,7 +929,7 @@ function closePlayerAction() {
   audio.pause();
   $('player').classList.add('hidden');
   $('queuePanel').classList.add('hidden');
-  closeNowPlaying();
+  synNowPlaying.close();
   playerStore.current = null; playerStore.isPlaying = false;
   markPlayingCards();
   stopPlViz();
@@ -1055,49 +1055,55 @@ $('player').addEventListener('pointerdown', (e) => {
   rip.addEventListener('animationend', () => rip.remove());
 });
 
-// ---- Now Playing (tela cheia) ----
+// ---- Now Playing (tela cheia) = ilha <syn-now-playing> ----
+// O SHELL (lifecycle/idle/fullscreen/painéis/transporte/meta reativa) vive no componente
+// (controller-by-id; dono de #nowPlaying + botões). O renderer mantém o HOT-PATH: anel do
+// espectro (viz, abaixo) e karaokê (ilha syn-lyrics) — acionados pelos intents da NP.
 let npVizRAF = null;
 
-function openNowPlaying() {
-  if (!playerStore.current) return;
-  if (blockedDuringLyricsEdit()) return;
-  $('nowPlaying').classList.remove('hidden', 'closing');
-  syncShuffleBtn(); syncRepeatBtn(); updatePlayButton(); updatePlayerMeta();
-  $('npVol').value = String(audio.volume);
-  rangeFill($('npSeek')); rangeFill($('npVol'));
+const synNowPlaying = document.querySelector('syn-now-playing');
+if (synNowPlaying) Object.assign(synNowPlaying, {
+  t,
+  blockedDuringLyricsEdit: () => blockedDuringLyricsEdit(),
+  closeView: (el) => closeViewAnimated(el),
+});
+
+// Intents da NP → o renderer (dono do viz/karaokê) executa.
+document.addEventListener('syn:np:opened', () => {
   syncNpViz();
-  if ($('nowPlaying').classList.contains('lyrics-mode')) { npLastCenter = null; npLyricCurTop = null; updateKaraoke(audio.currentTime); }
+  if (synNowPlaying.isLyricsMode()) { npLastCenter = null; npLyricCurTop = null; updateKaraoke(audio.currentTime); }
   updateChordsBtn();
   syncLyricScroll();
-  npScheduleIdle(); // começa a contar para o modo imersivo
-}
+});
+document.addEventListener('syn:np:closed', () => {
+  stopNpViz();
+  const ly = litLyricsEl(); if (ly) ly.active = false; // para o rAF da ilha de letra ao fechar
+});
+document.addEventListener('syn:np:lyrics-toggle', (e) => {
+  if (e.detail && e.detail.on) { npShowChords = false; renderNpLyrics(); npLastCenter = null; npLyricCurTop = null; updateKaraoke(audio.currentTime); }
+  updateChordsBtn();
+  syncLyricScroll();
+});
+document.addEventListener('syn:np:chords-action', () => {
+  if (npChordsDirty) { saveChordsInline(); return; }
+  npShowChords = !npShowChords;
+  renderNpLyrics();
+  npLastCenter = null; npLyricCurTop = null; updateKaraoke(audio.currentTime);
+});
+document.addEventListener('syn:np:queue-render', () => { if (synQueue) synQueue.render(); });
+document.addEventListener('syn:np:eq-open', () => { if (synAudio) synAudio.openNpPanel(); });
+document.addEventListener('syn:np:resize', () => sizeNpViz());
+
 // Abre o modo imersivo já em karaokê para a faixa de demonstração — concentra o
 // "uau" (ambiente colorido + letra sincronizada) num clique, sem o usuário caçar botões.
 // Pequeno atraso deixa a onda de cor do card aparecer antes do imersivo deslizar.
 function revealDemoImmersive() {
   setTimeout(() => {
     if (!playerStore.current || !isDemoTrack(playerStore.current)) return; // trocou de faixa nesse meio-tempo
-    openNowPlaying();
-    const np = $('nowPlaying');
-    if (!np.classList.contains('lyrics-mode')) {
-      np.classList.add('lyrics-mode');
-      $('npLyricsBtn').classList.add('active');
-      npShowChords = false; // entra no karaokê sem acordes
-      renderNpLyrics(); npLastCenter = null; npLyricCurTop = null; updateKaraoke(audio.currentTime);
-      updateChordsBtn();
-      syncLyricScroll();
-    }
+    synNowPlaying.open();
+    if (!synNowPlaying.isLyricsMode()) synNowPlaying.setLyricsMode(true); // entra no karaokê (chords off via handler)
   }, 260);
 }
-function closeNowPlaying() {
-  closeViewAnimated($('nowPlaying'));
-  hideNpPanels(); // EQ/fila imersivos não sobrevivem fora da NP
-  stopNpViz();
-  { const ly = litLyricsEl(); if (ly) ly.active = false; } // para o rAF da ilha Lit ao fechar
-  npStopIdle();
-  if (npIsFullscreen) toggleNpFullscreen(); // sai da tela cheia ao recolher
-}
-function npOpen() { return !$('nowPlaying').classList.contains('hidden'); }
 
 // Editor de letra aberto? Bloqueia ações do mini-player que conflitam com a edição.
 function lyricsEditorOpen() {
@@ -1111,83 +1117,6 @@ function blockedDuringLyricsEdit() {
   return false;
 }
 
-// ---- Modo imersivo ocioso: sem mouse, os controles somem com fade ----
-const NP_IDLE_MS = 3200;
-let npIdleTimer = null;
-function npScheduleIdle() {
-  clearTimeout(npIdleTimer);
-  // com um painel (EQ/fila) aberto não entra em imersão: o usuário está interagindo
-  npIdleTimer = setTimeout(() => { if (npOpen() && !npPanelOpen()) $('nowPlaying').classList.add('idle'); }, NP_IDLE_MS);
-}
-function npStopIdle() {
-  clearTimeout(npIdleTimer);
-  $('nowPlaying').classList.remove('idle');
-}
-function npWake() {            // movimento/entrada do mouse → reaparece e rearma o timer
-  if (!npOpen()) return;
-  $('nowPlaying').classList.remove('idle');
-  npScheduleIdle();
-}
-// movimento do mouse acorda os controles
-document.addEventListener('mousemove', npWake);
-// mouse saiu da janela do app (ou a janela perdeu o foco) → entra em imersão na hora
-function npSleepNow() { if (npOpen() && !npPanelOpen()) { clearTimeout(npIdleTimer); $('nowPlaying').classList.add('idle'); } }
-document.documentElement.addEventListener('mouseleave', npSleepNow);
-document.documentElement.addEventListener('mouseenter', npWake);
-window.addEventListener('blur', npSleepNow);
-window.addEventListener('focus', npWake);
-
-// ---- Tela cheia (imersão máxima) ----
-let npIsFullscreen = false;
-async function toggleNpFullscreen() {
-  npIsFullscreen = await window.api.toggleFullscreen();
-  $('nowPlaying').classList.toggle('np-fs', npIsFullscreen);
-  $('npFullscreen').innerHTML = npIsFullscreen ? ICONS.minimize : ICONS.maximize;
-  $('npFullscreen').title = npIsFullscreen ? t('player.exitFullscreen') : t('player.fullscreen');
-  setTimeout(() => { if (npOpen()) sizeNpViz(); }, 120); // recalcula a superfície após o resize
-}
-$('npFullscreen').addEventListener('click', toggleNpFullscreen);
-
-$('playerId').addEventListener('click', openNowPlaying);
-$('npCollapse').addEventListener('click', closeNowPlaying);
-$('npPlay').addEventListener('click', togglePlay);
-$('npPrev').addEventListener('click', playPrev);
-$('npNext').addEventListener('click', playNext);
-$('npShuffle').addEventListener('click', toggleShuffle);
-$('npRepeat').addEventListener('click', cycleRepeat);
-$('npSeek').addEventListener('input', () => seekTo(parseInt($('npSeek').value, 10)));
-$('npVol').addEventListener('input', () => setVolume(parseFloat($('npVol').value)));
-// painéis imersivos: EQ e fila abrem DENTRO da Now Playing (vidro sobre o ambiente)
-function npPanelOpen() {
-  return ['eqPanel', 'queuePanel'].some((id) => {
-    const p = $(id);
-    return p.classList.contains('np-mode') && !p.classList.contains('hidden');
-  });
-}
-function hideNpPanels() {
-  for (const id of ['eqPanel', 'queuePanel']) {
-    $(id).classList.add('hidden');
-    $(id).classList.remove('np-mode');
-  }
-  if (npOpen()) npScheduleIdle(); // volta a contar para o modo imersivo
-}
-$('npQueueBtn').addEventListener('click', () => {
-  const p = $('queuePanel');
-  const show = p.classList.contains('hidden');
-  hideNpPanels();
-  if (show) {
-    p.classList.remove('hidden', 'closing');
-    p.classList.add('np-mode');
-    if (synQueue) synQueue.render();
-  }
-});
-$('npEqBtn').addEventListener('click', () => {
-  const p = $('eqPanel');
-  const show = p.classList.contains('hidden');
-  hideNpPanels();
-  if (show && synAudio) synAudio.openNpPanel();
-});
-
 // ---- Visualizador circular da Now Playing ----
 // o canvas é uma superfície generosa; o raio do anel é calculado pelo tamanho da capa
 function sizeNpViz() {
@@ -1199,7 +1128,7 @@ function sizeNpViz() {
 }
 function drawNpViz() {
   const cv = $('npViz');
-  if (!cv || !synAudio.analyser || !npOpen()) { npVizRAF = null; return; }
+  if (!cv || !synAudio.analyser || !synNowPlaying.isOpen()) { npVizRAF = null; return; }
   const ctx = cv.getContext('2d');
   const w = cv.width, h = cv.height, cx = w / 2, cy = h / 2;
   ctx.clearRect(0, 0, w, h);
@@ -1252,7 +1181,7 @@ function stopNpViz() {
 }
 // liga/desliga o anel conforme estado de reprodução enquanto a NP está aberta
 function syncNpViz() {
-  if (!npOpen()) { stopNpViz(); return; }
+  if (!synNowPlaying.isOpen()) { stopNpViz(); return; }
   if (playerStore.isPlaying) startNpViz(); else stopNpViz();
 }
 
@@ -1322,7 +1251,7 @@ _litReady.then((m) => {
         toggle: togglePlay, next: playNext, prev: playPrev,
         shuffle: toggleShuffle, repeat: cycleRepeat,
         seek: seekTo, setVolume,
-        openNowPlaying, toggleEq: () => synAudio && synAudio.togglePanel(), toggleQueue: () => synQueue && synQueue.toggle(), closePlayer: closePlayerAction,
+        openNowPlaying: () => synNowPlaying.open(), toggleEq: () => synAudio && synAudio.togglePanel(), toggleQueue: () => synQueue && synQueue.toggle(), closePlayer: closePlayerAction,
       };
       // monta o mini-player Lit NO LUGAR do #player legado (vira o próprio #player)
       if (customElements.get('syn-mini-player')) {
@@ -1348,7 +1277,7 @@ _litReady.then((m) => {
         v.palette = barTargetPal;
         oldViz.replaceWith(v);
         _litViz = v;
-        if (typeof npOpen === 'function' && npOpen() && playerStore.isPlaying) v.active = true; // já tocando c/ NP aberta
+        if (synNowPlaying.isOpen() && playerStore.isPlaying) v.active = true; // já tocando c/ NP aberta
       }
     }
     // editor de detalhes Lit (Fase E, última ilha): substitui o INTERIOR legado de #editor
@@ -1427,7 +1356,7 @@ function updateChordsBtn() {
 function useLitLyrics() { return !!customElements.get('syn-lyrics'); }
 function litLyricsEl() { const box = $('npLyrics'); return box ? box.querySelector(':scope > syn-lyrics') : null; }
 // liga/desliga o rAF da ilha conforme o karaokê está visível (NP aberta + lyrics-mode)
-function syncLitLyrics() { const ly = litLyricsEl(); if (ly) ly.active = npOpen() && $('nowPlaying').classList.contains('lyrics-mode'); }
+function syncLitLyrics() { const ly = litLyricsEl(); if (ly) ly.active = synNowPlaying.isOpen() && synNowPlaying.isLyricsMode(); }
 
 function renderNpLyricsLit(box) {
   const synced = !!(npLyricsLines && npLyricsLines.length);
@@ -1461,7 +1390,7 @@ function renderNpLyricsLit(box) {
   ly.showChords = npShowChords;
   ly.plain = npLyricsPlain || '';
   ly.editMode = editMode;
-  ly.active = npOpen() && $('nowPlaying').classList.contains('lyrics-mode');
+  ly.active = synNowPlaying.isOpen() && synNowPlaying.isLyricsMode();
 }
 
 // Karaokê = ilha Lit <syn-lyrics>; o renderer só lhe entrega o estado (props down).
@@ -1483,22 +1412,8 @@ function syncLyricScroll() {
   syncLitLyrics();
 }
 
-$('npLyricsBtn').addEventListener('click', () => {
-  const np = $('nowPlaying');
-  const on = np.classList.toggle('lyrics-mode');
-  $('npLyricsBtn').classList.toggle('active', on);
-  if (on) { npShowChords = false; renderNpLyrics(); npLastCenter = null; npLyricCurTop = null; updateKaraoke(audio.currentTime); } // entra no karaokê sempre sem acordes
-  updateChordsBtn(); // habilita/desabilita o botão de acordes conforme o modo karaokê
-  syncLyricScroll();
-});
-
-// botão de acordes: quando há edições (disquete) → salva; senão alterna exibição
-$('npChordsBtn').addEventListener('click', () => {
-  if (npChordsDirty) { saveChordsInline(); return; }
-  npShowChords = !npShowChords;
-  renderNpLyrics();
-  npLastCenter = null; npLyricCurTop = null; updateKaraoke(audio.currentTime);
-});
+// Os cliques de letra/acordes (#npLyricsBtn/#npChordsBtn) são da <syn-now-playing>, que
+// emite syn:np:lyrics-toggle / syn:np:chords-action — tratados nos handlers de intent acima.
 
 // ============== Edição inline de acordes no karaokê (modo edição avançada) ==============
 function markChordsDirty() { if (!npChordsDirty) { npChordsDirty = true; updateChordsBtn(); } }
@@ -1543,12 +1458,12 @@ document.addEventListener('keydown', (e) => {
   // Esc: fecha o overlay/painel do topo (tela cheia → Now Playing → modais → painéis)
   if (e.key === 'Escape') {
     const vis = (id) => !$(id).classList.contains('hidden');
-    if (npIsFullscreen) { e.preventDefault(); toggleNpFullscreen(); return; }
-    if (npOpen() && npPanelOpen()) { e.preventDefault(); hideNpPanels(); return; }
-    if (npOpen() && $('nowPlaying').classList.contains('lyrics-mode')) {
-      e.preventDefault(); $('nowPlaying').classList.remove('lyrics-mode'); $('npLyricsBtn').classList.remove('active'); syncLyricScroll(); return;
+    if (synNowPlaying.isFullscreen()) { e.preventDefault(); synNowPlaying.toggleFullscreen(); return; }
+    if (synNowPlaying.isOpen() && synNowPlaying.panelOpen()) { e.preventDefault(); synNowPlaying.hidePanels(); return; }
+    if (synNowPlaying.isOpen() && synNowPlaying.isLyricsMode()) {
+      e.preventDefault(); synNowPlaying.setLyricsMode(false); return;
     }
-    if (npOpen()) { e.preventDefault(); closeNowPlaying(); return; }
+    if (synNowPlaying.isOpen()) { e.preventDefault(); synNowPlaying.close(); return; }
     if (vis('cropModal')) { if (synEditor) synEditor.closeCropper(); return; }
     if (vis('deleteModal')) { closeDeleteModal(); return; }
     if (vis('editorBackdrop')) { if (synEditor) synEditor.onEscape(); return; }
@@ -1568,7 +1483,7 @@ document.addEventListener('keydown', (e) => {
   if (editorOpen) return;
 
   // ←/→: faixa anterior/próxima (com a Now Playing aberta)
-  if (npOpen() && playerStore.current) {
+  if (synNowPlaying.isOpen() && playerStore.current) {
     if (e.key === 'ArrowLeft') { e.preventDefault(); playPrev(); return; }
     if (e.key === 'ArrowRight') { e.preventDefault(); playNext(); return; }
   }
@@ -1589,7 +1504,7 @@ document.addEventListener('click', (e) => {
 });
 
 // reajusta o anel do espectro ao redimensionar a janela
-window.addEventListener('resize', () => { if (npOpen()) sizeNpViz(); });
+window.addEventListener('resize', () => { if (synNowPlaying.isOpen()) sizeNpViz(); });
 
 // volume inicial
 (function initVolume() {
