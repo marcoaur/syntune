@@ -599,220 +599,20 @@ function renderArtistTracks(container, sortedSongs) {
 $('apBack').addEventListener('click', closeArtistPage);
 $('apPlay').addEventListener('click', () => playList(artistPageSongs));
 
-// ====================== Playlists ======================
-// Estado em playlistsStore (fonte única; core-store.js). Leitura: playlistsStore.playlists.
-let currentPlaylistId = null;
-let plDragFrom = -1;
-
-async function loadPlaylists() { await playlistsStore.load(); }
-async function savePlaylists() { await playlistsStore.save(); }
-function findPlaylist(id) { return playlistsStore.playlists.find((p) => p.id === id); }
-function playlistSongs(p) {
-  const byPath = new Map(libraryStore.songs.map((s) => [s.filePath, s]));
-  return (p.tracks || []).map((fp) => byPath.get(fp)).filter(Boolean);
-}
-function playlistCoverHtml(pSongs) {
-  const covers = [];
-  const seenAlbums = new Set();
-  for (const s of pSongs) {
-    if (coverState.get(s.filePath) === false) continue;
-    // dedupe por álbum (mesma capa) ou por arquivo quando sem álbum
-    const k = normalizeText(s.album || '') || s.filePath;
-    if (seenAlbums.has(k)) continue;
-    seenAlbums.add(k);
-    covers.push(coverUrl(s));
-    if (covers.length >= 4) break;
-  }
-  if (!covers.length) return '<span class="pl-cover-ph">♪</span>';
-  if (covers.length < 4) return `<span class="pl-cover-ph" style="background-image:url('${covers[0]}');background-size:cover;background-position:center"></span>`;
-  return covers.map((c) => `<img src="${c}" alt="" />`).join('');
-}
-
-function createPlaylist(name) {
-  const p = { id: 'pl-' + Date.now() + '-' + Math.random().toString(36).slice(2, 5), name: name || t('playlists.new'), tracks: [], createdAt: Date.now() };
-  playlistsStore.playlists.push(p);
-  savePlaylists();
-  return p;
-}
-function addToPlaylist(id, filePath) {
-  const p = findPlaylist(id); if (!p) return;
-  if (!p.tracks.includes(filePath)) { p.tracks.push(filePath); savePlaylists(); toast(t('playlists.addedTo', { name: p.name }), 'success'); }
-  else toast(t('playlists.alreadyIn'), '');
-}
-function removeFromPlaylist(id, filePath) {
-  const p = findPlaylist(id); if (!p) return;
-  const i = p.tracks.indexOf(filePath);
-  if (i >= 0) { p.tracks.splice(i, 1); savePlaylists(); if (currentPlaylistId === id) openPlaylistPage(id); }
-}
-function reorderPlaylist(id, from, to) {
-  const p = findPlaylist(id); if (!p) return;
-  const arr = p.tracks;
-  if (from < 0 || from >= arr.length || to < 0 || to >= arr.length) return;
-  const [m] = arr.splice(from, 1);
-  arr.splice(to, 0, m);
-  savePlaylists();
-  openPlaylistPage(id);
-}
-
-// ---- Grade de playlists ----
-function openPlaylistsView() {
-  renderPlaylistsGrid();
-  $('playlistsView').classList.remove('hidden', 'closing');
-  $('playlistsView').querySelector('.ap-scroll').scrollTop = 0;
-}
-function closePlaylistsView() { closeViewAnimated($('playlistsView')); }
-let _plIntentsWired = false;
-function renderPlaylistsGrid() {
-  const grid = $('plGrid');
-  if (!_plIntentsWired) { // delegação: card Lit <syn-playlist-card> sobe syn:playlist:open
-    grid.addEventListener('syn:playlist:open', (e) => openPlaylistPage(e.detail.id));
-    _plIntentsWired = true;
-  }
-  grid.innerHTML = '';
-  for (const p of playlistsStore.playlists) {
-    const ps = playlistSongs(p);
-    const c = document.createElement('syn-playlist-card');
-    c.pid = p.id; c.name = p.name; c.sub = tn('count.track', p.tracks.length); c.coverHtml = playlistCoverHtml(ps);
-    grid.appendChild(c);
-  }
-  // card "Nova playlist"
-  const add = document.createElement('div');
-  add.className = 'pl-card pl-new';
-  add.innerHTML = `<div class="pl-cover">${ICONS.plusSm}</div><div class="pl-card-name">${t('playlists.new')}</div><div class="pl-card-sub">${t('playlists.create')}</div>`;
-  add.addEventListener('click', newPlaylistFlow);
-  grid.appendChild(add);
-  $('plEmpty').classList.toggle('hidden', playlistsStore.playlists.length > 0);
-}
-function newPlaylistFlow() {
-  const p = createPlaylist();
-  openPlaylistPage(p.id);
-  setTimeout(renamePlaylistInline, 80); // já abre pronto para nomear
-}
-$('playlistsBtn').addEventListener('click', openPlaylistsView);
-$('plViewBack').addEventListener('click', closePlaylistsView);
-$('plNewBtn').addEventListener('click', newPlaylistFlow);
-
-// ---- Página da playlist ----
-function openPlaylistPage(id) {
-  const p = findPlaylist(id);
-  if (!p) { closePlaylistPage(); return; }
-  currentPlaylistId = id;
-  const ps = playlistSongs(p);
-
-  $('ppName').textContent = p.name;
-  $('ppStats').textContent = tn('count.song', ps.length);
-  $('ppCover').innerHTML = playlistCoverHtml(ps);
-
-  // ambiente derivado da 1ª capa
-  const firstCover = ps.find((s) => coverState.get(s.filePath) !== false);
-  if (firstCover) {
-    getPalette(coverUrl(firstCover)).then((pal) => {
-      if (pal) $('playlistPage').style.setProperty('--cv', `${pal.r}, ${pal.g}, ${pal.b}`);
-    });
-  } else $('playlistPage').style.setProperty('--cv', '124, 92, 255');
-
-  // faixas com reordenação + remover
-  const box = $('ppTracks');
-  box.innerHTML = '';
-  ps.forEach((s, i) => box.appendChild(buildPlaylistRow(s, ps, i, id)));
-  $('ppEmpty').classList.toggle('hidden', ps.length > 0);
-
-  $('playlistPage').classList.remove('hidden', 'closing');
-  $('playlistPage').querySelector('.ap-scroll').scrollTop = 0;
-  emitIntent('syn:player:mark-cards');
-}
-function closePlaylistPage() { closeViewAnimated($('playlistPage')); currentPlaylistId = null; }
-
-function buildPlaylistRow(s, pSongs, index, id) {
-  const card = buildSongCard(s, pSongs);
-  card.classList.add('pp-row');
-  card.draggable = true;
-
-  // ilha Lit: handle + remover vêm no TEMPLATE (modo row) — não injetar no light-DOM
-  // (o card re-renderiza ao carregar a capa e apagaria nós injetados).
-  card.vm = { ...card.vm, row: true };
-  card.addEventListener('syn:song:remove', () => removeFromPlaylist(id, s.filePath));
-
-  card.addEventListener('dragstart', () => { plDragFrom = index; card.classList.add('dragging'); });
-  card.addEventListener('dragend', () => {
-    card.classList.remove('dragging');
-    document.querySelectorAll('.pp-row.drop-target').forEach((el) => el.classList.remove('drop-target'));
-    plDragFrom = -1;
+// ====================== Playlists (view <syn-playlists>) ======================
+// O domínio de playlists vive na ilha <syn-playlists> (dona da grade+página, CRUD, drag,
+// rename, export, sync). Estado vem dos stores; efeitos cross-subsistema chegam pelos
+// intents (já wired). O renderer só injeta glue/UI e aciona pelos métodos públicos.
+const synPlaylists = document.querySelector('syn-playlists');
+if (synPlaylists) {
+  Object.assign(synPlaylists, {
+    t, tn, toast,
+    closeView: (el) => closeViewAnimated(el),
+    showScanIndicator, hideScanIndicator,
+    getPalette, coverUrl, coverState,
   });
-  card.addEventListener('dragover', (e) => { e.preventDefault(); card.classList.add('drop-target'); });
-  card.addEventListener('dragleave', () => card.classList.remove('drop-target'));
-  card.addEventListener('drop', (e) => {
-    e.preventDefault(); card.classList.remove('drop-target');
-    if (plDragFrom < 0 || plDragFrom === index) return;
-    reorderPlaylist(id, plDragFrom, index);
-  });
-  return card;
 }
-
-function renamePlaylistInline() {
-  const p = findPlaylist(currentPlaylistId); if (!p) return;
-  const nameEl = $('ppName');
-  const input = document.createElement('input');
-  input.type = 'text'; input.className = 'pp-name-input'; input.value = p.name;
-  nameEl.textContent = ''; nameEl.appendChild(input);
-  input.focus(); input.select();
-  const commit = async () => {
-    const v = input.value.trim() || p.name;
-    p.name = v; await savePlaylists();
-    nameEl.textContent = v;
-  };
-  input.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') input.blur();
-    else if (e.key === 'Escape') { input.value = p.name; input.blur(); }
-  });
-  input.addEventListener('blur', commit, { once: true });
-}
-
-$('ppBack').addEventListener('click', () => { closePlaylistPage(); openPlaylistsView(); });
-$('ppPlay').addEventListener('click', () => { const p = findPlaylist(currentPlaylistId); if (p) emitIntent('syn:player:play-list', { songs: playlistSongs(p) }); });
-$('ppRename').addEventListener('click', renamePlaylistInline);
-$('ppDelete').addEventListener('click', async () => {
-  const p = findPlaylist(currentPlaylistId); if (!p) return;
-  if (!(await askConfirm(t('playlists.deleteConfirm', { name: p.name }), { danger: true, confirmLabel: t('common.delete') }))) return;
-  playlistsStore.setPlaylists(playlistsStore.playlists.filter((x) => x.id !== p.id));
-  await savePlaylists();
-  closePlaylistPage();
-  openPlaylistsView();
-  toast(t('playlists.deleted'), 'success');
-});
-$('ppExport').addEventListener('click', async () => {
-  const p = findPlaylist(currentPlaylistId); if (!p || !p.tracks.length) { toast(t('playlists.empty'), 'error'); return; }
-  const res = await window.api.playlistExportM3u({ name: p.name, tracks: p.tracks });
-  if (res && res.error) { toast(res.error, 'error'); return; }
-  if (res && res.success) toast(t('playlists.exported'), 'success');
-});
-$('ppSync').addEventListener('click', async () => {
-  const p = findPlaylist(currentPlaylistId); if (!p || !p.tracks.length) { toast(t('playlists.empty'), 'error'); return; }
-  if (!devicesStore.activeDevice) { toast(t('playlists.connectDevice'), 'error'); return; }
-  showScanIndicator(t('playlists.syncing'));
-  const res = await window.api.playlistSyncToDevice({ serial: devicesStore.activeDevice.serial, name: p.name, tracks: p.tracks });
-  hideScanIndicator();
-  if (res && res.error) { toast(res.error, 'error'); return; }
-  try { const st = await window.api.deviceSyncState(devicesStore.activeDevice.serial); devicesStore.setSyncedKeys(st.keys || []); emitIntent('syn:library:refresh'); } catch { /* ok */ }
-  toast(t('playlists.syncResult', {
-    count: res.count,
-    copied: res.copied ? t('playlists.syncCopied', { n: res.copied }) : ''
-  }), 'success');
-});
-
-// ---- "Adicionar à playlist" (menu de contexto) ----
-function openAddToPlaylistMenu(s, anchorEl) {
-  const items = [{ head: t('playlists.addToMenu') }];
-  for (const p of playlistsStore.playlists) {
-    items.push({ icon: ICONS.queue, label: p.name, onClick: () => addToPlaylist(p.id, s.filePath) });
-  }
-  items.push({ sep: true });
-  items.push({ icon: ICONS.plusSm, label: t('playlists.new'), onClick: () => {
-    const p = createPlaylist(); p.tracks.push(s.filePath); savePlaylists();
-    toast(t('playlists.createdWithTrack', { name: p.name }), 'success');
-  } });
-  menu().open(anchorEl, items);
-}
+$('playlistsBtn').addEventListener('click', () => { if (synPlaylists) synPlaylists.open(); });
 
 // O card de faixa é a folha compartilhada buildSongCard (components/song/build-song-card.js):
 // factory pura dirigida por VM. As ações (play/menu/cover) sobem como intents (eventos
@@ -1864,7 +1664,7 @@ function openSongMenu(s, anchorEl) {
   menu().open(anchorEl, [
     { icon: ICONS.edit, label: t('menu.details'), onClick: () => openEditor(s) },
     { icon: ICONS.next, label: t('menu.playNext'), onClick: () => enqueueNext(s) },
-    { icon: ICONS.queue, label: t('playlists.addToMenu'), onClick: () => openAddToPlaylistMenu(s, anchorEl) },
+    { icon: ICONS.queue, label: t('playlists.addToMenu'), onClick: () => synPlaylists && synPlaylists.addToPlaylistMenu(s, anchorEl) },
     { icon: ICONS.trash, label: t('common.delete'), danger: true, onClick: () => openDeleteModal(s) },
   ]);
 }
@@ -3199,8 +2999,8 @@ document.addEventListener('keydown', (e) => {
     if (vis('settingsModal')) { closeViewAnimated($('settingsModal')); return; }
     if (!$('eqPanel').classList.contains('hidden')) { $('eqPanel').classList.add('hidden'); return; }
     if (!$('queuePanel').classList.contains('hidden')) { $('queuePanel').classList.add('hidden'); return; }
-    if (vis('playlistPage')) { closePlaylistPage(); openPlaylistsView(); return; }
-    if (vis('playlistsView')) { closePlaylistsView(); return; }
+    if (vis('playlistPage')) { synPlaylists.closePage(); synPlaylists.open(); return; }
+    if (vis('playlistsView')) { synPlaylists.closeGrid(); return; }
     if (vis('artistPage')) { closeArtistPage(); return; }
     if ($('addBar').classList.contains('open')) { $('ytUrl').value = ''; closeAdd(); return; }
     return;
@@ -3912,7 +3712,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   }
 
   // o restante da inicialização não bloqueia a exibição da tela inicial
-  Promise.all([loadPlaylists(), initSyncContext(), initEq()]).catch(() => {});
+  Promise.all([playlistsStore.load(), initSyncContext(), initEq()]).catch(() => {});
   window.api.getConfig().then((cfg) => {
     if (cfg) advancedEdit = cfg.advancedEdit === true;
     if (cfg && !cfg.apiKey) {
