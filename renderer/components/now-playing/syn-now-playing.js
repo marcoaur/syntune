@@ -94,7 +94,6 @@ export class SynNowPlaying extends HTMLElement {
     const b = this.#g('npFullscreen');
     b.innerHTML = this._fullscreen ? ICONS.minimize : ICONS.maximize;
     b.title = this._fullscreen ? this.#tr('player.exitFullscreen') : this.#tr('player.fullscreen');
-    setTimeout(() => { if (this.isOpen()) this.#emit('syn:np:resize'); }, 120); // recalcula o anel
   }
 
   // ---------- painéis imersivos (EQ / fila) ----------

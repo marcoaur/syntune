@@ -528,7 +528,6 @@ let vizCard = null, vizCanvas = null, vizCtx = null, vizRAF = null;
 // até a alvo a cada frame — assim a cor das barras transiciona ao trocar de música.
 let barTargetPal = { r: 124, g: 92, b: 255, text: '#ffffff' };
 let vizCurPal = null;
-let npCurPal = null;
 
 function resizeViz() {
   if (!vizCanvas || !vizCard) return;
@@ -634,38 +633,17 @@ function markPlayingCards() {
 }
 
 // monta a capa de um container do player com fallback p/ placeholder
-function setCoverEl(container, song) {
-  if (coverState.get(song.filePath) === false) {
-    container.innerHTML = '<span class="ph">♪</span>';
-    return;
-  }
-  const img = document.createElement('img');
-  img.alt = '';
-  img.onerror = () => {
-    coverState.set(song.filePath, false);
-    container.innerHTML = '<span class="ph">♪</span>';
-  };
-  img.src = coverUrl(song);
-  container.innerHTML = '';
-  container.appendChild(img);
-}
-
+// Meta da faixa atual: tinge a UI (applyNowColor) e ATUALIZA O STORE — o mini-player e a
+// now-playing renderizam título/artista/capa reativamente assinando o playerStore. Sem
+// escrita direta no DOM (os componentes são donos dos seus ids).
 function updatePlayerMeta() {
   const cur = playerStore.current;
   if (!cur) return;
   const title = cur.title || (cur.fileName || '').replace(/\.mp3$/i, '') || '—';
   const artist = cur.artist || '';
-  // player-half: null-guard (após o swap p/ syn-mini-player esses ids somem; a facade abaixo dirige)
-  { const e = $('playerTitle'); if (e) e.textContent = title; }
-  { const e = $('playerArtist'); if (e) e.textContent = artist; }
-  { const e = $('playerCover'); if (e) setCoverEl(e, cur); }
-  $('npTitle').textContent = title;
-  $('npArtist').textContent = artist;
-  setCoverEl($('npCover'), cur);
-  // tinge a UI com a cor da capa (null se sabidamente sem capa)
-  applyNowColor(coverState.get(cur.filePath) === false ? null : coverUrl(cur));
-  // facade: estado discreto p/ os componentes do player (sub-passo 1 da Fase D)
-  if (_litPlayer) _litPlayer.setState({ title, artist, current: cur, coverUrl: coverState.get(cur.filePath) === false ? null : coverUrl(cur) });
+  const cover = coverState.get(cur.filePath) === false ? null : coverUrl(cur);
+  applyNowColor(cover); // tinge a UI com a cor da capa (null se sabidamente sem capa)
+  if (_litPlayer) _litPlayer.setState({ title, artist, current: cur, coverUrl: cover });
 }
 
 // cor dinâmica da capa atual: define a cor-alvo (barras interpolam até ela) e os
@@ -689,10 +667,9 @@ async function applyNowColor(dataUrl) {
   if (lyBox) lyBox.style.setProperty('--chord-accent', npChordAccent.join(','));
 }
 
+// Notifica o estado play/pause: os componentes (mini-player/now-playing) trocam o ícone
+// reativamente assinando o playerStore.
 function updatePlayButton() {
-  const ic = playerStore.isPlaying ? ICONS.pause : ICONS.play;
-  { const e = $('playBtn'); if (e) e.innerHTML = ic; }
-  $('npPlay').innerHTML = ic;
   if (_litPlayer) _litPlayer.setState({ isPlaying: playerStore.isPlaying });
 }
 
@@ -882,28 +859,17 @@ audio.addEventListener('error', () => {
   if (playerStore.current && !audioReloading) toast(t('player.playbackError'), 'error');
 });
 
-// ---- Controles (espelhados entre o mini-player e a Now Playing) ----
+// ---- Controles (mini-player e now-playing renderizam reativamente via playerStore) ----
 function toggleShuffle() { playerStore.shuffle = !playerStore.shuffle; syncShuffleBtn(); }
 function syncShuffleBtn() {
-  const shuffle = playerStore.shuffle;
-  { const e = $('shuffleBtn'); if (e) e.classList.toggle('active', shuffle); }
-  $('npShuffle').classList.toggle('active', shuffle);
-  if (_litPlayer) _litPlayer.setState({ shuffle });
+  if (_litPlayer) _litPlayer.setState({ shuffle: playerStore.shuffle });
 }
 function cycleRepeat() {
   playerStore.repeatMode = playerStore.repeatMode === 'off' ? 'all' : (playerStore.repeatMode === 'all' ? 'one' : 'off');
   syncRepeatBtn();
 }
 function syncRepeatBtn() {
-  const repeatMode = playerStore.repeatMode;
-  const icon = repeatMode === 'one' ? ICONS.repeatOne : ICONS.repeat;
-  const active = repeatMode !== 'off';
-  const title = repeatMode === 'one' ? t('player.repeatTrack') : (repeatMode === 'all' ? t('player.repeatQueue') : t('player.repeat'));
-  for (const id of ['repeatBtn', 'npRepeat']) {
-    const el = $(id);
-    if (el) { el.classList.toggle('active', active); el.innerHTML = icon; el.title = title; }
-  }
-  if (_litPlayer) _litPlayer.setState({ repeatMode });
+  if (_litPlayer) _litPlayer.setState({ repeatMode: playerStore.repeatMode });
 }
 function seekTo(v) {
   if (audio.duration) audio.currentTime = (v / 1000) * audio.duration;
@@ -1058,9 +1024,7 @@ $('player').addEventListener('pointerdown', (e) => {
 // ---- Now Playing (tela cheia) = ilha <syn-now-playing> ----
 // O SHELL (lifecycle/idle/fullscreen/painéis/transporte/meta reativa) vive no componente
 // (controller-by-id; dono de #nowPlaying + botões). O renderer mantém o HOT-PATH: anel do
-// espectro (viz, abaixo) e karaokê (ilha syn-lyrics) — acionados pelos intents da NP.
-let npVizRAF = null;
-
+// espectro (ilha syn-visualizer) e karaokê (ilha syn-lyrics) — acionados pelos intents da NP.
 const synNowPlaying = document.querySelector('syn-now-playing');
 if (synNowPlaying) Object.assign(synNowPlaying, {
   t,
@@ -1092,7 +1056,6 @@ document.addEventListener('syn:np:chords-action', () => {
 });
 document.addEventListener('syn:np:queue-render', () => { if (synQueue) synQueue.render(); });
 document.addEventListener('syn:np:eq-open', () => { if (synAudio) synAudio.openNpPanel(); });
-document.addEventListener('syn:np:resize', () => sizeNpViz());
 
 // Abre o modo imersivo já em karaokê para a faixa de demonstração — concentra o
 // "uau" (ambiente colorido + letra sincronizada) num clique, sem o usuário caçar botões.
@@ -1117,67 +1080,15 @@ function blockedDuringLyricsEdit() {
   return false;
 }
 
-// ---- Visualizador circular da Now Playing ----
-// o canvas é uma superfície generosa; o raio do anel é calculado pelo tamanho da capa
-function sizeNpViz() {
-  const cv = $('npViz');
-  const dpr = Math.min(window.devicePixelRatio || 1, 2);
-  const css = Math.min(window.innerHeight * 0.92, window.innerWidth * 0.95);
-  cv.style.width = css + 'px'; cv.style.height = css + 'px';
-  cv.width = Math.round(css * dpr); cv.height = Math.round(css * dpr);
-}
-function drawNpViz() {
-  const cv = $('npViz');
-  if (!cv || !synAudio.analyser || !synNowPlaying.isOpen()) { npVizRAF = null; return; }
-  const ctx = cv.getContext('2d');
-  const w = cv.width, h = cv.height, cx = w / 2, cy = h / 2;
-  ctx.clearRect(0, 0, w, h);
-  synAudio.analyser.getByteFrequencyData(synAudio.freqData);
-
-  // o anel acompanha o TAMANHO ATUAL DA CAPA (inclui o zoom do modo ocioso e a tela cheia)
-  const coverRect = $('npCover').getBoundingClientRect();
-  const cvRect = cv.getBoundingClientRect();
-  const pxScale = cvRect.width ? (w / cvRect.width) : 1; // device px por css px
-  const coverR = Math.max(40, (coverRect.width / 2) * pxScale);
-  const baseR = coverR * 1.06;     // começa logo após a borda da capa
-  const maxLen = coverR * 0.62;    // barras crescem ~60% do raio da capa (um pouco além)
-
-  const bins = synAudio.freqData.length;
-  const bars = 84;
-  npCurPal = lerpPal(npCurPal, barTargetPal, 0.09); // transição suave ao trocar de música
-  const colors = deriveBarColors(npCurPal);
-  ctx.lineCap = 'round';
-  ctx.lineWidth = Math.max(2, coverR * 0.03);
-  ctx.shadowBlur = coverR * 0.08;
-  for (let i = 0; i < bars; i++) {
-    // espelha o espectro nos dois lados para um anel simétrico
-    const half = i < bars / 2 ? i : (bars - 1 - i);
-    const idx = Math.floor((half / (bars / 2)) * bins * 0.8);
-    const v = (synAudio.freqData[idx] || 0) / 255;
-    const len = coverR * 0.04 + v * maxLen;
-    const ang = (i / bars) * Math.PI * 2 - Math.PI / 2;
-    const x1 = cx + Math.cos(ang) * baseR, y1 = cy + Math.sin(ang) * baseR;
-    const x2 = cx + Math.cos(ang) * (baseR + len), y2 = cy + Math.sin(ang) * (baseR + len);
-    const grad = ctx.createLinearGradient(x1, y1, x2, y2);
-    grad.addColorStop(0, colors.bottom);
-    grad.addColorStop(1, colors.top);
-    ctx.strokeStyle = grad;
-    ctx.shadowColor = colors.top;
-    ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
-  }
-  npVizRAF = requestAnimationFrame(drawNpViz);
-}
+// ---- Visualizador circular da Now Playing = ilha <syn-visualizer> ----
+// O desenho (canvas + rAF + auto-size) vive na ilha; o renderer só liga/desliga o anel
+// (active) e injeta o analyser/freqData compartilhados do grafo de áudio.
 function startNpViz() {
   synAudio.ensureGraph();
-  // sempre re-injeta (cobre o early-return do ensureAnalyser quando o analyser já existia)
-  if (_litViz) { _litViz.analyser = synAudio.analyser; _litViz.freqData = synAudio.freqData; _litViz.active = true; return; }
-  if (npVizRAF) return;
-  sizeNpViz();
-  npVizRAF = requestAnimationFrame(drawNpViz);
+  if (_litViz) { _litViz.analyser = synAudio.analyser; _litViz.freqData = synAudio.freqData; _litViz.active = true; }
 }
 function stopNpViz() {
   if (_litViz) _litViz.active = false;
-  if (npVizRAF) { cancelAnimationFrame(npVizRAF); npVizRAF = null; }
 }
 // liga/desliga o anel conforme estado de reprodução enquanto a NP está aberta
 function syncNpViz() {
@@ -1270,7 +1181,6 @@ _litReady.then((m) => {
     if (customElements.get('syn-visualizer')) {
       const oldViz = document.getElementById('npViz');
       if (oldViz && oldViz.tagName === 'CANVAS') {
-        if (npVizRAF) { cancelAnimationFrame(npVizRAF); npVizRAF = null; } // para o loop legado antes de trocar o canvas
         const v = document.createElement('syn-visualizer');
         v.coverEl = document.getElementById('npCover');
         if (synAudio.analyser) { v.analyser = synAudio.analyser; v.freqData = synAudio.freqData; } // se já criado
@@ -1503,8 +1413,6 @@ document.addEventListener('click', (e) => {
   if (b) b.blur();
 });
 
-// reajusta o anel do espectro ao redimensionar a janela
-window.addEventListener('resize', () => { if (synNowPlaying.isOpen()) sizeNpViz(); });
 
 // volume inicial
 (function initVolume() {
