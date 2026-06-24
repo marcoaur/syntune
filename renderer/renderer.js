@@ -16,7 +16,7 @@ import { loading, palette, menu, confirm as confirmCap } from './components/capa
 // Store-núcleo (ARCHITECTURE-V2 Fase 3): fonte única do estado central. Por ora só a
 // biblioteca (`songs`); o renderer escreve via libraryStore.setSongs e mantém o global
 // `songs` como ESPELHO (subscribe abaixo) — leitores migram pro store aos poucos.
-import { libraryStore, playlistsStore } from './services/core-store.js';
+import { libraryStore, playlistsStore, playerStore } from './services/core-store.js';
 
 // Substitui o confirm() nativo (síncrono/bloqueante) pela capacidade <syn-confirm> (async).
 function askConfirm(message, opts = {}) {
@@ -2894,7 +2894,7 @@ const _litReady = Promise.resolve(true);
 // Toast via ilha Lit: monta UM <syn-app-root> global (provê os serviços) com <syn-toast> dentro.
 // O toast() encaminha pro ToastService da ilha.
 let _litToast = null;
-let _litPlayer = null; // facade do player (Fase D): o renderer sincroniza estado aqui
+const _litPlayer = playerStore; // facade do player (store-núcleo): singleton eager, sempre disponível
 let _litViz = null;    // visualizer Lit (Fase E): recebe analyser/freqData/coverEl/palette/active
 _litReady.then((m) => {
   if (!m || !customElements.get('syn-toast')) return;
@@ -2903,8 +2903,8 @@ _litReady.then((m) => {
     root.appendChild(document.createElement('syn-toast'));
     document.body.appendChild(root);
     _litToast = (root.services && root.services.toast) || null;
-    // PlayerService como fonte única de estado: liga o <audio> real + estado inicial.
-    _litPlayer = (root.services && root.services.player) || null;
+    // PlayerService = singleton eager (mesma instância que o app-root provê via context).
+    // Liga o <audio> real + estado inicial + transporte.
     if (_litPlayer) {
       _litPlayer.audio = audio;
       _litPlayer.setState({ volume: audio.volume, shuffle, repeatMode });

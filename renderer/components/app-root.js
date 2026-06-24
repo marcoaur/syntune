@@ -11,11 +11,10 @@ import {
   apiContext, playerContext, libraryContext, paletteContext,
   settingsContext, i18nContext, devicesContext, toastContext,
 } from '../services/contexts.js';
-import { PlayerService } from '../services/player-service.js';
 import { PaletteService } from '../services/palette-service.js';
-// Store-núcleo (Fase 3): api + biblioteca são SINGLETONS eager (core-store.js); o
-// app-root só os re-provê via context → mesma instância que o renderer escreve.
-import { coreApi, libraryStore } from '../services/core-store.js';
+// Store-núcleo (Fase 3): api + biblioteca + player são SINGLETONS eager (core-store.js);
+// o app-root só os re-provê via context → mesma instância que o renderer escreve.
+import { coreApi, libraryStore, playerStore } from '../services/core-store.js';
 import { SettingsService } from '../services/settings-service.js';
 import { I18nService } from '../services/i18n-service.js';
 import { DevicesService } from '../services/devices-service.js';
@@ -28,7 +27,7 @@ export class SynAppRoot extends LitElement {
     const api = coreApi;
     const services = {
       api,
-      player: new PlayerService(),
+      player: playerStore,
       library: libraryStore,
       palette: new PaletteService(),
       settings: new SettingsService(api),

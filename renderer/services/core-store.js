@@ -11,6 +11,7 @@
 import { ApiService } from './api-service.js';
 import { LibraryService } from './library-service.js';
 import { PlaylistsService } from './playlists-service.js';
+import { PlayerService } from './player-service.js';
 
 /** Ponte IPC única (pass-through tipado). */
 export const coreApi = new ApiService();
@@ -20,3 +21,7 @@ export const libraryStore = new LibraryService(coreApi);
 
 /** Playlists: fonte única de `playlists`. subscribe('playlists', fn). */
 export const playlistsStore = new PlaylistsService(coreApi);
+
+/** Player: estado de reprodução (current/isPlaying/...). Eager → sempre disponível,
+ *  sem depender do mount do <syn-app-root> (remove SPOF/timing dos guards do renderer). */
+export const playerStore = new PlayerService();
