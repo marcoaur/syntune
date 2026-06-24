@@ -12,6 +12,8 @@ export class PlayerService extends StoreService {
     this.audio = null; // injetado pelo renderer (o <audio> real)
     /** @type {object|null} */ this.current = null;
     /** @type {object[]} */ this.queue = [];
+    /** lista ordenada renderizada pela biblioteca = base da fila ao tocar um card. */
+    /** @type {object[]} */ this.visibleList = [];
     // estado discreto consumido pelos componentes (sincronizado pelo renderer):
     this.title = '';
     this.artist = '';

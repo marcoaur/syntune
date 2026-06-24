@@ -58,7 +58,6 @@ function applyStaticI18n() {
 
 // ====================== Estado ======================
 // `songs` vive em libraryStore (fonte única; core-store.js). Leitura: libraryStore.songs.
-let pendingJobs = [];    // downloads/enriquecimentos em andamento (transientes)
 
 // Sincronização com dispositivo
 // activeDevice/syncedKeys vivem em devicesStore (fonte única; core-store.js).
@@ -74,7 +73,6 @@ let collapsedArtists = new Set();     // artistas com a seção recolhida
 let listEntrance = true;
 
 // Player
-let visibleList = [];           // lista ordenada renderizada (base da fila)
 let queue = [];                 // fila de reprodução atual
 let queueIndex = -1;            // índice da faixa atual na fila
 let current = null;             // faixa em reprodução
@@ -294,15 +292,15 @@ function renderList() {
   list.classList.toggle('no-entrance', !listEntrance);
   listEntrance = false;
 
-  // jobs em andamento aparecem no topo
-  for (const job of pendingJobs) list.appendChild(buildPendingCard(job));
+  // jobs em andamento (downloads) aparecem no topo — fornecidos pela ilha syn-add
+  if (synAdd) for (const c of synAdd.pendingCards()) list.appendChild(c);
 
   // músicas da biblioteca + faixas que só existem no dispositivo, filtradas pela busca
   const all = libraryStore.songs.concat(devicesStore.deviceOnlySongs);
   const terms = normalizeText(searchQuery).split(/\s+/).filter(Boolean);
   const filtered = terms.length ? all.filter((s) => matchesQuery(s, terms)) : all;
   const sorted = sortSongs(filtered);
-  visibleList = sorted; // base da fila de reprodução (na ordem exibida)
+  playerStore.visibleList = sorted; // base da fila de reprodução (na ordem exibida)
 
   if (groupBy) renderGenreShelves(list, sorted);
   else {
@@ -319,7 +317,7 @@ function renderList() {
   const hasLib = all.length > 0;
   $('searchBox').classList.toggle('hidden', !hasLib);
   $('groupToggle').classList.toggle('hidden', !hasLib);
-  const empty = pendingJobs.length === 0 && all.length === 0;
+  const empty = !(synAdd && synAdd.hasPending()) && all.length === 0;
   const noResults = all.length > 0 && sorted.length === 0;
   $('emptyState').classList.toggle('hidden', !empty);
   $('noResults').classList.toggle('hidden', !noResults);
@@ -644,300 +642,16 @@ function wireViewIntents() {
   document.addEventListener('syn:player:play-list', (e) => playList((e.detail && e.detail.songs) || []));
   document.addEventListener('syn:player:mark-cards', () => markPlayingCards());
   document.addEventListener('syn:library:refresh', () => renderList());
+  document.addEventListener('syn:library:reload', () => reloadLibrary());
+  document.addEventListener('syn:devices:resync', () => maybeResync());
+  document.addEventListener('syn:toolbar:refresh', () => refreshToolbarStatus());
 }
 wireViewIntents();
 
-function buildPendingCard(job) {
-  const card = document.createElement('div');
-  card.className = 'song-card pending' + (job.status === 'error' ? ' error' : '');
-  card.dataset.jobId = job.id;
-
-  const thumb = document.createElement('div');
-  thumb.className = 'song-thumb';
-  if (job.coverDataUrl) {
-    const img = document.createElement('img');
-    img.src = job.coverDataUrl; img.alt = '';
-    thumb.appendChild(img);
-  } else {
-    thumb.innerHTML = '<span class="ph">♪</span>';
-  }
-
-  const info = document.createElement('div');
-  info.className = 'song-info';
-  const title = document.createElement('div');
-  title.className = 'song-title';
-  title.textContent = job.title || t('jobs.newSong');
-  const sub = document.createElement('div');
-  sub.className = 'song-sub';
-  sub.textContent = job.status === 'error' ? ('⚠ ' + (job.error || t('jobs.failed'))) : (job.statusMsg || t('jobs.queued'));
-  info.append(title, sub);
-
-  if (job.status !== 'error') {
-    const prog = document.createElement('div');
-    prog.className = 'progress';
-    const bar = document.createElement('div');
-    bar.className = 'progress-bar';
-    bar.style.width = (job.progress || 0) + '%';
-    prog.appendChild(bar);
-    info.appendChild(prog);
-  }
-
-  card.append(thumb, info);
-
-  if (job.status === 'error') {
-    // tentar novamente: o job volta para a fila de download
-    const retry = document.createElement('button');
-    retry.className = 'song-menu';
-    retry.textContent = '↻';
-    retry.title = t('jobs.retry');
-    retry.addEventListener('click', () => {
-      job.status = 'queued';
-      job.error = null;
-      job.progress = 0;
-      job.statusMsg = t('jobs.queued');
-      renderList();
-      pumpDownloads();
-    });
-    // descartar o job com erro
-    const dismiss = document.createElement('button');
-    dismiss.className = 'song-menu';
-    dismiss.textContent = '✕';
-    dismiss.title = t('jobs.dismiss');
-    dismiss.addEventListener('click', () => {
-      pendingJobs = pendingJobs.filter((j) => j !== job);
-      renderList();
-    });
-    card.append(retry, dismiss);
-  }
-  return card;
-}
-
-// atualização leve só da barra/texto de um job (evita re-render completo a cada tick)
-function updateJobEl(job) {
-  const el = document.querySelector(`.song-card.pending[data-job-id="${job.id}"]`);
-  if (!el) { renderList(); return; }
-  const bar = el.querySelector('.progress-bar');
-  if (bar) bar.style.width = (job.progress || 0) + '%';
-  const sub = el.querySelector('.song-sub');
-  if (sub) sub.textContent = job.statusMsg || t('jobs.processing');
-  const title = el.querySelector('.song-title');
-  if (title && job.title) title.textContent = job.title;
-  if (job.coverDataUrl) {
-    const thumb = el.querySelector('.song-thumb');
-    if (thumb && !thumb.querySelector('img')) {
-      thumb.innerHTML = `<img src="${job.coverDataUrl}" alt="" />`;
-    }
-  }
-  refreshToolbarStatus(); // resumo de loading sempre visível na barra superior
-}
-
-// ====================== Adicionar (overlay: URL do YouTube ou arquivo MP3) ======================
-function openAdd() {
-  collapseSearch();                       // o adicionar sobrepõe a busca
-  $('addBar').classList.add('open');
-  $('addError').classList.add('hidden');
-  setTimeout(() => $('ytUrl').focus(), 40);
-}
-function closeAdd() {
-  $('addBar').classList.remove('open');
-  $('addError').classList.add('hidden');
-}
-$('addBtn').addEventListener('click', () => {
-  if ($('addBar').classList.contains('open')) closeAdd();
-  else openAdd();
-});
-$('addCancel').addEventListener('click', () => { $('ytUrl').value = ''; closeAdd(); });
-
-function isYouTubeUrl(url) {
-  return /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be|music\.youtube\.com)\//i.test(url || '');
-}
-
-function enqueueAdd() {
-  const url = $('ytUrl').value.trim();
-  const errEl = $('addError');
-  if (!url) return;
-  if (!isYouTubeUrl(url)) {
-    errEl.textContent = t('main.invalidUrl');
-    errEl.classList.remove('hidden', 'closing');
-    return;
-  }
-  $('ytUrl').value = '';
-  closeAdd();
-
-  pendingJobs.push({
-    id: 'job-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
-    url, status: 'queued', progress: 0, statusMsg: t('jobs.queued'),
-    title: '', artist: '', year: '', coverDataUrl: null, error: null
-  });
-  renderList();
-  pumpDownloads();
-}
-
-// importar um MP3 local para a biblioteca
-async function importMp3() {
-  const p = await window.api.selectMp3();
-  if (!p) return;
-  $('ytUrl').value = '';
-  closeAdd();
-  showScanIndicator(t('jobs.importing'));
-  const res = await window.api.libraryImport(p);
-  if (res.error) { hideScanIndicator(); toast(res.error, 'error'); return; }
-  // etapa de enriquecimento: busca a letra (sincronizada, se houver) e grava no arquivo
-  showScanIndicator(t('jobs.fetchingLyrics'));
-  try { await window.api.enrichLyricsFile(res.filePath); } catch { /* sem letra: segue */ }
-  hideScanIndicator();
-  await reloadLibrary();
-  maybeResync();
-  toast(t('jobs.mp3Added'), 'success');
-}
-
-$('ytBtn').addEventListener('click', enqueueAdd);
-$('pickMp3').addEventListener('click', importMp3);
-$('ytUrl').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') enqueueAdd();
-  else if (e.key === 'Escape') { $('ytUrl').value = ''; closeAdd(); }
-});
-
-// Motor de fila: no máximo 2 downloads simultâneos. Ao terminar o download, o job
-// passa para o enriquecimento (que é serializado/espaçado pelo rate limiter no main,
-// na ordem em que os downloads terminam) e uma vaga de download é liberada.
-const MAX_DOWNLOADS = 2;
-
-function pumpDownloads() {
-  const downloading = pendingJobs.filter((j) => j.status === 'downloading').length;
-  let slots = MAX_DOWNLOADS - downloading;
-  for (const job of pendingJobs) {
-    if (slots <= 0) break;
-    if (job.status === 'queued') {
-      slots--;
-      startJob(job); // marca como 'downloading' de forma síncrona
-    }
-  }
-}
-
-async function startJob(job) {
-  job.status = 'downloading';
-  job.progress = 2;
-  job.statusMsg = t('jobs.starting');
-  updateJobEl(job);
-
-  try {
-    // 1) baixar áudio + coletar contexto da página
-    const dl = await window.api.youtubeDownload({ jobId: job.id, url: job.url });
-    if (dl.error) throw new Error(dl.error);
-    job.tempPath = dl.filePath;
-    job.ytContext = dl.ytContext;
-    job.thumb = dl.thumbnailDataUrl;
-    job.title = dl.videoTitle || t('jobs.newSong');
-
-    // download concluído -> entra no enriquecimento e libera vaga para o próximo
-    job.status = 'enriching';
-    job.progress = 60;
-    job.statusMsg = t('jobs.enrichQueue');
-    updateJobEl(job);
-    pumpDownloads();
-
-    // 2) enriquecer metadados (fontes factuais + 2 chamadas, rate-limited no main)
-    let data = {};
-    let factualCover = null;
-    if (dl.ytContext) {
-      const meta = await window.api.smartMetadata({
-        jobId: job.id,
-        ytContext: dl.ytContext,
-        hint: '',
-        raw: { fileName: dl.videoTitle, title: '', artist: '', album: '' }
-      });
-      if (meta.error) throw new Error(meta.error);
-      data = meta.data || {};
-      factualCover = meta.coverDataUrl || null; // capa em alta de MusicBrainz/iTunes
-    }
-
-    // 3) capa: prioriza a capa factual em alta sobre a thumbnail do YouTube
-    let coverDataUrl = null;
-    const coverSource = factualCover || dl.thumbnailDataUrl;
-    if (coverSource) {
-      try { coverDataUrl = await makeCenterCrop(coverSource); }
-      catch { coverDataUrl = coverSource; }
-    }
-    job.title = data.title || dl.videoTitle;
-    job.artist = data.artist || '';
-    job.year = data.year || '';
-    job.coverDataUrl = coverDataUrl;
-    updateJobEl(job);
-
-    // 3.5) letra: busca sincronizada (LRCLIB) como etapa de enriquecimento
-    if (data.title || data.artist || dl.videoTitle) {
-      job.statusMsg = t('jobs.fetchingLyrics');
-      job.progress = 90;
-      updateJobEl(job);
-      try {
-        const ly = await window.api.fetchSyncedLyrics({
-          artist: data.artist || '',
-          title: data.title || dl.cleanName || dl.videoTitle || '',
-          album: data.album || '',
-          duration: 0
-        });
-        if (ly && !ly.error && (ly.synced || ly.plain)) data.lyrics = ly.synced || ly.plain;
-      } catch { /* sem letra: segue sem bloquear o salvamento */ }
-    }
-
-    // 4) salvar direto na biblioteca (sem diálogo)
-    job.status = 'saving';
-    job.progress = 94;
-    job.statusMsg = t('jobs.savingLibrary');
-    updateJobEl(job);
-    const suggested = (data.artist && data.title)
-      ? `${data.artist} - ${data.title}`
-      : (data.title || dl.cleanName || dl.videoTitle || 'audio');
-    const save = await window.api.saveTags({
-      filePath: dl.filePath,
-      source: 'library',
-      suggestedName: suggested,
-      imageDataUrl: coverDataUrl,
-      fields: data
-    });
-    if (save.error) throw new Error(save.error);
-
-    // concluído: remove o job e recarrega a biblioteca
-    const title = job.title;
-    pendingJobs = pendingJobs.filter((j) => j !== job);
-    await reloadLibrary();
-    toast(t('jobs.added', { title }), 'success');
-    maybeResync(); // se há dispositivo sincronizando, leva a nova música
-  } catch (err) {
-    job.status = 'error';
-    job.error = (err && err.message) ? err.message : String(err);
-    renderList();
-  } finally {
-    // garante que a fila continue (caso a falha tenha ocorrido ainda no download)
-    pumpDownloads();
-  }
-}
-
-// progresso do download (yt-dlp), por jobId -> mapeia para 2–58%
-window.api.onYoutubeProgress(({ jobId, msg, percent }) => {
-  const job = pendingJobs.find((j) => j.id === jobId);
-  if (!job || job.status !== 'downloading') return;
-  if (percent != null && percent > 0) job.progress = 2 + Math.round((percent / 100) * 56);
-  job.statusMsg = (percent != null && percent > 0) ? t('jobs.downloadingPct', { p: percent }) : (msg || t('jobs.downloading'));
-  updateJobEl(job);
-});
-
-// progresso do pipeline Gemini, por jobId -> 60–92%
-// usa as flags estruturadas do payload (waiting/step), independentes do idioma
-window.api.onGeminiProgress(({ jobId, msg, waiting, step }) => {
-  const job = pendingJobs.find((j) => j.id === jobId);
-  if (!job) return;
-  job.statusMsg = msg;
-  if (waiting) {
-    // em espera de rate limit: mantém a barra, só atualiza o texto
-  } else if (step === 1) {
-    job.progress = 68;
-  } else if (step === 2) {
-    job.progress = 84;
-  }
-  updateJobEl(job);
-});
+// Ilha "Adicionar música" + downloads (owns #addBar/jobs). Injeta glue/UI; expõe
+// pendingCards()/hasPending()/jobStatusMsg() p/ a biblioteca/toolbar.
+const synAdd = document.querySelector('syn-add');
+if (synAdd) Object.assign(synAdd, { t, toast, showScanIndicator, hideScanIndicator, collapseSearch, makeCenterCrop });
 
 // ====================== Editor (modal) ======================
 function showEditor() { $('editorBackdrop').classList.remove('hidden', 'closing'); }
@@ -2141,7 +1855,7 @@ async function playAt(index) {
 // toca a partir de um card: a fila vem da lista de contexto (visível, ou a do artista)
 function playFromCard(song, listOverride) {
   ensureAnalyser(); // cria/retoma o AudioContext dentro do gesto do usuário
-  queue = (listOverride && listOverride.length ? listOverride : visibleList).slice();
+  queue = (listOverride && listOverride.length ? listOverride : playerStore.visibleList).slice();
   let idx = queue.findIndex((s) => s.filePath === song.filePath);
   if (idx < 0) { queue = [song]; idx = 0; } // faixa fora da lista visível: toca só ela
   playAt(idx);
@@ -2190,7 +1904,7 @@ function playList(list, idx = 0) {
 function togglePlay() {
   if (!current) {
     // nada carregado: começa pela lista visível
-    if (visibleList.length) playFromCard(visibleList[0]);
+    if (playerStore.visibleList.length) playFromCard(playerStore.visibleList[0]);
     return;
   }
   ensureAnalyser(); // retoma o AudioContext dentro do gesto
@@ -3000,7 +2714,7 @@ document.addEventListener('keydown', (e) => {
     if (vis('playlistPage')) { synPlaylists.closePage(); synPlaylists.open(); return; }
     if (vis('playlistsView')) { synPlaylists.closeGrid(); return; }
     if (vis('artistPage')) { closeArtistPage(); return; }
-    if ($('addBar').classList.contains('open')) { $('ytUrl').value = ''; closeAdd(); return; }
+    if (synAdd && synAdd.isOpen()) { $('ytUrl').value = ''; synAdd.close(); return; }
     return;
   }
 
@@ -3016,7 +2730,7 @@ document.addEventListener('keydown', (e) => {
 
   // Espaço: tocar/pausar
   if (e.code === 'Space') {
-    if (!current && !visibleList.length) return;
+    if (!current && !playerStore.visibleList.length) return;
     e.preventDefault();
     togglePlay();
   }
@@ -3195,7 +2909,7 @@ $('queueBtn').addEventListener('click', () => $('eqPanel').classList.add('hidden
 
 // ====================== Busca (expansível) e agrupamento ======================
 function expandSearch() {
-  closeAdd();
+  if (synAdd) synAdd.close();
   $('searchBox').classList.add('expanded');
   $('toolbar').classList.add('searching');
   $('searchInput').focus();
@@ -3341,12 +3055,8 @@ $('groupToggle').addEventListener('click', () => {
 // downloads/enriquecimento em andamento; senão, mostra a varredura/sync do dispositivo.
 let syncStatusMsg = null;
 function refreshToolbarStatus() {
-  const active = pendingJobs.filter((j) =>
-    j.status === 'downloading' || j.status === 'enriching' || j.status === 'saving');
-  let msg = null;
-  if (active.length === 1) msg = active[0].statusMsg || t('jobs.processing');
-  else if (active.length > 1) msg = t('jobs.nProcessing', { n: active.length });
-  else if (syncStatusMsg) msg = syncStatusMsg;
+  // jobs de download (ilha syn-add) têm prioridade; senão, a varredura/sync do dispositivo
+  let msg = (synAdd && synAdd.jobStatusMsg()) || syncStatusMsg;
 
   const el = $('toolbarStatus');
   if (msg) { $('toolbarStatusMsg').textContent = msg; el.classList.remove('hidden', 'closing'); }
