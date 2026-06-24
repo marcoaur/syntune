@@ -64,13 +64,10 @@ function applyStaticI18n() {
 // Leitura: devicesStore.activeDevice / devicesStore.syncedKeys; escrita via setX.
 
 
-// Player
-let queue = [];                 // fila de reprodução atual
-let queueIndex = -1;            // índice da faixa atual na fila
-let current = null;             // faixa em reprodução
-let isPlaying = false;
-let shuffle = false;
-let repeatMode = 'off';         // 'off' | 'all' | 'one'
+// Player — estado de reprodução agora é fonte ÚNICA no playerStore (store-núcleo).
+// O engine escreve em playerStore.{current,isPlaying,queue,queueIndex,shuffle,repeatMode};
+// os componentes (mini-player/now-playing/lyrics/viz) leem o MESMO singleton. As funções
+// update*/sync* abaixo continuam notificando as ilhas (emitChange via setState).
 
 
 // ====================== Capas via protocolo mp3cover:// ======================
@@ -277,7 +274,7 @@ function wireSongCardDelegation() {
   document.addEventListener('syn:song:play', (e) => {
     const el = e.target.closest && e.target.closest('syn-song-card'); if (!el || !el._song) return;
     const s = el._song;
-    if (current && current.filePath === s.filePath) togglePlay();
+    if (playerStore.current && playerStore.current.filePath === s.filePath) togglePlay();
     else { spawnPlayBurst(el); playFromCard(s, el._queue); if (isDemoTrack(s)) revealDemoImmersive(); }
   });
   document.addEventListener('syn:song:menu', (e) => {
@@ -312,7 +309,7 @@ if (synLibrary) Object.assign(synLibrary, {
 });
 // Painel da fila (engine no renderer; injeta leitura da fila, ações por intent).
 const synQueue = document.querySelector('syn-queue');
-if (synQueue) Object.assign(synQueue, { t, coverUrl, coverState, getQueue: () => queue, getIndex: () => queueIndex });
+if (synQueue) Object.assign(synQueue, { t, coverUrl, coverState, getQueue: () => playerStore.queue, getIndex: () => playerStore.queueIndex });
 // Editor de detalhes (cola; owns #editorBackdrop/#cropModal/#lyricsModal). Capacidades
 // próprias (loading/confirm/palette); engine via intents.
 const synEditor = document.querySelector('syn-editor');
@@ -330,8 +327,8 @@ function wireViewIntents() {
   document.addEventListener('syn:queue:remove', (e) => removeFromQueue(e.detail.index));
   document.addEventListener('syn:queue:reorder', (e) => reorderQueue(e.detail.from, e.detail.to));
   document.addEventListener('syn:player:play', (e) => { if (e.detail && e.detail.song) playFromCard(e.detail.song); });
-  document.addEventListener('syn:player:before-save', (e) => { if (current && current.filePath === e.detail.filePath) audioReloading = true; });
-  document.addEventListener('syn:player:reload-current', (e) => { if (current && current.filePath === e.detail.filePath) { npLyricsPath = null; loadCurrentLyrics(current.filePath); reloadCurrentAudio(); } });
+  document.addEventListener('syn:player:before-save', (e) => { if (playerStore.current && playerStore.current.filePath === e.detail.filePath) audioReloading = true; });
+  document.addEventListener('syn:player:reload-current', (e) => { if (playerStore.current && playerStore.current.filePath === e.detail.filePath) { npLyricsPath = null; loadCurrentLyrics(playerStore.current.filePath); reloadCurrentAudio(); } });
   document.addEventListener('syn:delete:open', (e) => openDeleteModal(e.detail.song));
 }
 wireViewIntents();
@@ -623,13 +620,13 @@ function rangeFill(el) {
 // destaca o card que está tocando e monta o visualizador de espectro nele
 function markPlayingCards() {
   document.querySelectorAll('.song-card.playing').forEach((el) => el.classList.remove('playing', 'paused'));
-  if (!current) { stopVisualizer(); return; }
-  const sel = (window.CSS && CSS.escape) ? CSS.escape(current.filePath) : current.filePath;
+  if (!playerStore.current) { stopVisualizer(); return; }
+  const sel = (window.CSS && CSS.escape) ? CSS.escape(playerStore.current.filePath) : playerStore.current.filePath;
   const el = document.querySelector(`.song-card[data-path="${sel}"]`);
   if (!el) { stopVisualizer(); return; }
   el.classList.add('playing');
-  if (isPlaying) {
-    startVisualizer(el, current.coverDataUrl);
+  if (playerStore.isPlaying) {
+    startVisualizer(el, playerStore.current.coverDataUrl);
   } else {
     el.classList.add('paused');
     pauseVisualizer(); // congela as barras no último quadro
@@ -654,20 +651,21 @@ function setCoverEl(container, song) {
 }
 
 function updatePlayerMeta() {
-  if (!current) return;
-  const title = current.title || (current.fileName || '').replace(/\.mp3$/i, '') || '—';
-  const artist = current.artist || '';
+  const cur = playerStore.current;
+  if (!cur) return;
+  const title = cur.title || (cur.fileName || '').replace(/\.mp3$/i, '') || '—';
+  const artist = cur.artist || '';
   // player-half: null-guard (após o swap p/ syn-mini-player esses ids somem; a facade abaixo dirige)
   { const e = $('playerTitle'); if (e) e.textContent = title; }
   { const e = $('playerArtist'); if (e) e.textContent = artist; }
-  { const e = $('playerCover'); if (e) setCoverEl(e, current); }
+  { const e = $('playerCover'); if (e) setCoverEl(e, cur); }
   $('npTitle').textContent = title;
   $('npArtist').textContent = artist;
-  setCoverEl($('npCover'), current);
+  setCoverEl($('npCover'), cur);
   // tinge a UI com a cor da capa (null se sabidamente sem capa)
-  applyNowColor(coverState.get(current.filePath) === false ? null : coverUrl(current));
+  applyNowColor(coverState.get(cur.filePath) === false ? null : coverUrl(cur));
   // facade: estado discreto p/ os componentes do player (sub-passo 1 da Fase D)
-  if (_litPlayer) _litPlayer.setState({ title, artist, current, coverUrl: coverState.get(current.filePath) === false ? null : coverUrl(current) });
+  if (_litPlayer) _litPlayer.setState({ title, artist, current: cur, coverUrl: coverState.get(cur.filePath) === false ? null : coverUrl(cur) });
 }
 
 // cor dinâmica da capa atual: define a cor-alvo (barras interpolam até ela) e os
@@ -692,10 +690,10 @@ async function applyNowColor(dataUrl) {
 }
 
 function updatePlayButton() {
-  const ic = isPlaying ? ICONS.pause : ICONS.play;
+  const ic = playerStore.isPlaying ? ICONS.pause : ICONS.play;
   { const e = $('playBtn'); if (e) e.innerHTML = ic; }
   $('npPlay').innerHTML = ic;
-  if (_litPlayer) _litPlayer.setState({ isPlaying });
+  if (_litPlayer) _litPlayer.setState({ isPlaying: playerStore.isPlaying });
 }
 
 let loadSeq = 0; // protege contra trocas rápidas: descarta a faixa anterior
@@ -715,7 +713,7 @@ async function loadAndPlay(song) {
 // mudam (sobretudo ao adicionar acordes/letra), o que faz o stream ao vivo via
 // mp3file:// falhar a decodificação ("erro de reprodução"). O ?v= força o refetch.
 function reloadCurrentAudio() {
-  if (!current) return;
+  if (!playerStore.current) return;
   const pos = audio.currentTime || 0;
   const wasPlaying = !audio.paused;
   audioReloading = true;
@@ -728,28 +726,28 @@ function reloadCurrentAudio() {
   };
   audio.addEventListener('loadedmetadata', onMeta);
   setTimeout(done, 4000); // segurança: nunca deixa o erro suprimido para sempre
-  audio.src = 'mp3file://' + encodeURIComponent(current.filePath) + '?v=' + Date.now();
+  audio.src = 'mp3file://' + encodeURIComponent(playerStore.current.filePath) + '?v=' + Date.now();
 }
 
 // Avisa antes de trocar de faixa com edições de acordes não salvas. Retorna false
 // (abortar) se o usuário cancelar; true caso contrário (sem edições, mesma faixa, ou OK).
 async function confirmChordSwitch(index) {
   if (!npChordsDirty) return true;
-  const next = queue[index];
-  if (!next || (current && next.filePath === current.filePath)) return true;
+  const next = playerStore.queue[index];
+  if (!next || (playerStore.current && next.filePath === playerStore.current.filePath)) return true;
   return askConfirm(t('chords.confirmDiscard'), { danger: true });
 }
 
 async function playAt(index) {
-  if (index < 0 || index >= queue.length) return;
+  if (index < 0 || index >= playerStore.queue.length) return;
   if (!(await confirmChordSwitch(index))) return; // edições de acordes não salvas: usuário cancelou
-  queueIndex = index;
-  current = queue[index];
+  playerStore.queueIndex = index;
+  playerStore.current = playerStore.queue[index];
   $('player').classList.remove('hidden', 'closing');
   updatePlayerMeta();
   flareAmbient(); // o ambiente da biblioteca respira na cor da nova faixa
-  loadCurrentLyrics(current.filePath); // prepara o karaokê para a nova faixa
-  const ok = await loadAndPlay(current);
+  loadCurrentLyrics(playerStore.current.filePath); // prepara o karaokê para a nova faixa
+  const ok = await loadAndPlay(playerStore.current);
   if (!ok) return;
   markPlayingCards();
   if (synQueue) synQueue.render();
@@ -758,21 +756,21 @@ async function playAt(index) {
 // toca a partir de um card: a fila vem da lista de contexto (visível, ou a do artista)
 function playFromCard(song, listOverride) {
   synAudio.ensureGraph(); // cria/retoma o AudioContext dentro do gesto do usuário
-  queue = (listOverride && listOverride.length ? listOverride : playerStore.visibleList).slice();
-  let idx = queue.findIndex((s) => s.filePath === song.filePath);
-  if (idx < 0) { queue = [song]; idx = 0; } // faixa fora da lista visível: toca só ela
+  playerStore.queue = (listOverride && listOverride.length ? listOverride : playerStore.visibleList).slice();
+  let idx = playerStore.queue.findIndex((s) => s.filePath === song.filePath);
+  if (idx < 0) { playerStore.queue = [song]; idx = 0; } // faixa fora da lista visível: toca só ela
   playAt(idx);
 }
 // "Tocar a seguir": insere a faixa logo após a atual na fila (sem interromper)
 function enqueueNext(s) {
-  if (!current) { playFromCard(s); return; } // nada tocando: toca direto
-  const existing = queue.findIndex((x) => x.filePath === s.filePath);
-  if (existing === queueIndex) { toast(t('player.alreadyPlaying'), ''); return; }
+  if (!playerStore.current) { playFromCard(s); return; } // nada tocando: toca direto
+  const existing = playerStore.queue.findIndex((x) => x.filePath === s.filePath);
+  if (existing === playerStore.queueIndex) { toast(t('player.alreadyPlaying'), ''); return; }
   if (existing >= 0) {
-    queue.splice(existing, 1);
-    if (existing < queueIndex) queueIndex--;
+    playerStore.queue.splice(existing, 1);
+    if (existing < playerStore.queueIndex) playerStore.queueIndex--;
   }
-  queue.splice(queueIndex + 1, 0, s);
+  playerStore.queue.splice(playerStore.queueIndex + 1, 0, s);
   if (synQueue) synQueue.render();
   const title = s.title || (s.fileName || '').replace(/\.mp3$/i, '');
   toast(t('player.playsNext', { title }), 'success');
@@ -780,19 +778,20 @@ function enqueueNext(s) {
 
 // reordena a fila por arraste, preservando a faixa atual
 function reorderQueue(from, to) {
-  if (from === to || from < 0 || to < 0 || from >= queue.length || to >= queue.length) return;
-  const [m] = queue.splice(from, 1);
-  queue.splice(to, 0, m);
-  if (queueIndex === from) queueIndex = to;
-  else if (from < queueIndex && to >= queueIndex) queueIndex--;
-  else if (from > queueIndex && to <= queueIndex) queueIndex++;
+  const q = playerStore.queue;
+  if (from === to || from < 0 || to < 0 || from >= q.length || to >= q.length) return;
+  const [m] = q.splice(from, 1);
+  q.splice(to, 0, m);
+  if (playerStore.queueIndex === from) playerStore.queueIndex = to;
+  else if (from < playerStore.queueIndex && to >= playerStore.queueIndex) playerStore.queueIndex--;
+  else if (from > playerStore.queueIndex && to <= playerStore.queueIndex) playerStore.queueIndex++;
   if (synQueue) synQueue.render();
 }
 
 function removeFromQueue(i) {
-  if (i === queueIndex) return; // a faixa atual não sai da fila
-  queue.splice(i, 1);
-  if (i < queueIndex) queueIndex--;
+  if (i === playerStore.queueIndex) return; // a faixa atual não sai da fila
+  playerStore.queue.splice(i, 1);
+  if (i < playerStore.queueIndex) playerStore.queueIndex--;
   if (synQueue) synQueue.render();
 }
 
@@ -800,12 +799,12 @@ function removeFromQueue(i) {
 function playList(list, idx = 0) {
   if (!list || !list.length) return;
   synAudio.ensureGraph();
-  queue = list.slice();
+  playerStore.queue = list.slice();
   playAt(idx >= 0 && idx < list.length ? idx : 0);
 }
 
 function togglePlay() {
-  if (!current) {
+  if (!playerStore.current) {
     // nada carregado: começa pela lista visível
     if (playerStore.visibleList.length) playFromCard(playerStore.visibleList[0]);
     return;
@@ -815,37 +814,38 @@ function togglePlay() {
 }
 
 function nextIndex() {
-  if (repeatMode === 'one') return queueIndex;
-  if (shuffle) {
-    if (queue.length <= 1) return queueIndex;
+  const qi = playerStore.queueIndex, q = playerStore.queue;
+  if (playerStore.repeatMode === 'one') return qi;
+  if (playerStore.shuffle) {
+    if (q.length <= 1) return qi;
     let r;
-    do { r = Math.floor(Math.random() * queue.length); } while (r === queueIndex);
+    do { r = Math.floor(Math.random() * q.length); } while (r === qi);
     return r;
   }
-  if (queueIndex + 1 < queue.length) return queueIndex + 1;
-  return repeatMode === 'all' ? 0 : -1;
+  if (qi + 1 < q.length) return qi + 1;
+  return playerStore.repeatMode === 'all' ? 0 : -1;
 }
 
 function playNext() {
   const i = nextIndex();
-  if (i < 0) { isPlaying = false; updatePlayButton(); markPlayingCards(); return; }
+  if (i < 0) { playerStore.isPlaying = false; updatePlayButton(); markPlayingCards(); return; }
   playAt(i);
 }
 
 function playPrev() {
   // se já passou de 3s, reinicia a faixa; senão volta uma
   if (audio.currentTime > 3) { audio.currentTime = 0; return; }
-  if (shuffle) { playAt(nextIndex()); return; }
-  if (queueIndex - 1 >= 0) playAt(queueIndex - 1);
+  if (playerStore.shuffle) { playAt(nextIndex()); return; }
+  if (playerStore.queueIndex - 1 >= 0) playAt(playerStore.queueIndex - 1);
   else audio.currentTime = 0;
 }
 
 // ---- Eventos do elemento de áudio ----
-audio.addEventListener('play', () => { isPlaying = true; updatePlayButton(); markPlayingCards(); syncNpViz(); syncPlViz(); });
-audio.addEventListener('pause', () => { isPlaying = false; updatePlayButton(); markPlayingCards(); syncNpViz(); syncPlViz(); });
+audio.addEventListener('play', () => { playerStore.isPlaying = true; updatePlayButton(); markPlayingCards(); syncNpViz(); syncPlViz(); });
+audio.addEventListener('pause', () => { playerStore.isPlaying = false; updatePlayButton(); markPlayingCards(); syncNpViz(); syncPlViz(); });
 audio.addEventListener('ended', () => {
   // com acordes não salvos, não avança automaticamente (preservaria as edições): pausa e avisa
-  if (npChordsDirty) { toast(t('chords.unsaved'), ''); isPlaying = false; updatePlayButton(); markPlayingCards(); return; }
+  if (npChordsDirty) { toast(t('chords.unsaved'), ''); playerStore.isPlaying = false; updatePlayButton(); markPlayingCards(); return; }
   playNext();
 });
 audio.addEventListener('timeupdate', () => {
@@ -853,8 +853,9 @@ audio.addEventListener('timeupdate', () => {
     if (!window.currentScrobbled && (audio.currentTime > audio.duration / 2 || audio.currentTime > 240)) {
       window.currentScrobbled = true;
       // lê do objeto `current` (não do DOM — o mini-player Lit não tem #playerArtist)
-      const tArtist = (current && current.artist) || '';
-      const tTitle = (current && (current.title || (current.fileName || '').replace(/\.mp3$/i, ''))) || '';
+      const cur = playerStore.current;
+      const tArtist = (cur && cur.artist) || '';
+      const tTitle = (cur && (cur.title || (cur.fileName || '').replace(/\.mp3$/i, ''))) || '';
       if (tArtist && tTitle) {
         window.api.lastfmScrobble({ artist: tArtist, title: tTitle, timestamp: window.currentScrobbleTimestamp });
       }
@@ -878,21 +879,23 @@ audio.addEventListener('loadedmetadata', () => {
 // Ignora o erro transitório enquanto a faixa tocando é reescrita+recarregada (save).
 let audioReloading = false;
 audio.addEventListener('error', () => {
-  if (current && !audioReloading) toast(t('player.playbackError'), 'error');
+  if (playerStore.current && !audioReloading) toast(t('player.playbackError'), 'error');
 });
 
 // ---- Controles (espelhados entre o mini-player e a Now Playing) ----
-function toggleShuffle() { shuffle = !shuffle; syncShuffleBtn(); }
+function toggleShuffle() { playerStore.shuffle = !playerStore.shuffle; syncShuffleBtn(); }
 function syncShuffleBtn() {
+  const shuffle = playerStore.shuffle;
   { const e = $('shuffleBtn'); if (e) e.classList.toggle('active', shuffle); }
   $('npShuffle').classList.toggle('active', shuffle);
   if (_litPlayer) _litPlayer.setState({ shuffle });
 }
 function cycleRepeat() {
-  repeatMode = repeatMode === 'off' ? 'all' : (repeatMode === 'all' ? 'one' : 'off');
+  playerStore.repeatMode = playerStore.repeatMode === 'off' ? 'all' : (playerStore.repeatMode === 'all' ? 'one' : 'off');
   syncRepeatBtn();
 }
 function syncRepeatBtn() {
+  const repeatMode = playerStore.repeatMode;
   const icon = repeatMode === 'one' ? ICONS.repeatOne : ICONS.repeat;
   const active = repeatMode !== 'off';
   const title = repeatMode === 'one' ? t('player.repeatTrack') : (repeatMode === 'all' ? t('player.repeatQueue') : t('player.repeat'));
@@ -927,7 +930,7 @@ function closePlayerAction() {
   $('player').classList.add('hidden');
   $('queuePanel').classList.add('hidden');
   closeNowPlaying();
-  current = null; isPlaying = false;
+  playerStore.current = null; playerStore.isPlaying = false;
   markPlayingCards();
   stopPlViz();
 }
@@ -966,7 +969,7 @@ function stopPlViz() {
   $('player').style.setProperty('--beat', '0');
 }
 function syncPlViz() {
-  if (isPlaying && !$('player').classList.contains('hidden')) startPlViz();
+  if (playerStore.isPlaying && !$('player').classList.contains('hidden')) startPlViz();
   else stopPlViz();
 }
 
@@ -1020,7 +1023,7 @@ let appFadingOut = false;
 window.api.onAppFadeout(() => {
   if (appFadingOut) return;
   appFadingOut = true;
-  if (!current || audio.paused || audio.volume <= 0.01) { window.api.fadeoutDone(); return; }
+  if (!playerStore.current || audio.paused || audio.volume <= 0.01) { window.api.fadeoutDone(); return; }
   const v0 = audio.volume;
   const T = 320; // ms: rápido, mas sem corte abrupto
   const t0 = performance.now();
@@ -1056,7 +1059,7 @@ $('player').addEventListener('pointerdown', (e) => {
 let npVizRAF = null;
 
 function openNowPlaying() {
-  if (!current) return;
+  if (!playerStore.current) return;
   if (blockedDuringLyricsEdit()) return;
   $('nowPlaying').classList.remove('hidden', 'closing');
   syncShuffleBtn(); syncRepeatBtn(); updatePlayButton(); updatePlayerMeta();
@@ -1073,7 +1076,7 @@ function openNowPlaying() {
 // Pequeno atraso deixa a onda de cor do card aparecer antes do imersivo deslizar.
 function revealDemoImmersive() {
   setTimeout(() => {
-    if (!current || !isDemoTrack(current)) return; // trocou de faixa nesse meio-tempo
+    if (!playerStore.current || !isDemoTrack(playerStore.current)) return; // trocou de faixa nesse meio-tempo
     openNowPlaying();
     const np = $('nowPlaying');
     if (!np.classList.contains('lyrics-mode')) {
@@ -1250,7 +1253,7 @@ function stopNpViz() {
 // liga/desliga o anel conforme estado de reprodução enquanto a NP está aberta
 function syncNpViz() {
   if (!npOpen()) { stopNpViz(); return; }
-  if (isPlaying) startNpViz(); else stopNpViz();
+  if (playerStore.isPlaying) startNpViz(); else stopNpViz();
 }
 
 // ====================== Letra / Karaokê ======================
@@ -1313,7 +1316,7 @@ _litReady.then((m) => {
     // Liga o <audio> real + estado inicial + transporte.
     if (_litPlayer) {
       _litPlayer.audio = audio;
-      _litPlayer.setState({ volume: audio.volume, shuffle, repeatMode });
+      _litPlayer.setState({ volume: audio.volume, shuffle: _litPlayer.shuffle, repeatMode: _litPlayer.repeatMode });
       // transporte: a facade delega às funções existentes do renderer
       _litPlayer.controls = {
         toggle: togglePlay, next: playNext, prev: playPrev,
@@ -1330,7 +1333,7 @@ _litReady.then((m) => {
           mp.className = legacy.className; // preserva 'player hidden'
           mp.player = _litPlayer; mp.t = t;
           legacy.replaceWith(mp);
-          if (current) _litPlayer.setState({ title: current.title || '', artist: current.artist || '', current });
+          if (_litPlayer.current) _litPlayer.setState({ title: _litPlayer.current.title || '', artist: _litPlayer.current.artist || '', current: _litPlayer.current });
         }
       }
     }
@@ -1345,7 +1348,7 @@ _litReady.then((m) => {
         v.palette = barTargetPal;
         oldViz.replaceWith(v);
         _litViz = v;
-        if (typeof npOpen === 'function' && npOpen() && isPlaying) v.active = true; // já tocando c/ NP aberta
+        if (typeof npOpen === 'function' && npOpen() && playerStore.isPlaying) v.active = true; // já tocando c/ NP aberta
       }
     }
     // editor de detalhes Lit (Fase E, última ilha): substitui o INTERIOR legado de #editor
@@ -1508,7 +1511,7 @@ function msStamp(tSec) {
 }
 
 async function saveChordsInline() {
-  if (!current) return;
+  if (!playerStore.current) return;
   const lrc = (npChordsLines || [])
     .filter((c) => c.text && c.text.trim())
     .slice().sort((a, b) => a.t - b.t)
@@ -1516,7 +1519,7 @@ async function saveChordsInline() {
     .join('\n');
   audioReloading = true; // o arquivo será reescrito sob o stream
   try {
-    const res = await window.api.chordsSet(current.filePath, lrc);
+    const res = await window.api.chordsSet(playerStore.current.filePath, lrc);
     if (res && res.error) { toast(res.error, 'error'); audioReloading = false; return; }
   } catch (err) {
     toast(String((err && err.message) || err), 'error'); audioReloading = false; return;
@@ -1565,14 +1568,14 @@ document.addEventListener('keydown', (e) => {
   if (editorOpen) return;
 
   // ←/→: faixa anterior/próxima (com a Now Playing aberta)
-  if (npOpen() && current) {
+  if (npOpen() && playerStore.current) {
     if (e.key === 'ArrowLeft') { e.preventDefault(); playPrev(); return; }
     if (e.key === 'ArrowRight') { e.preventDefault(); playNext(); return; }
   }
 
   // Espaço: tocar/pausar
   if (e.code === 'Space') {
-    if (!current && !playerStore.visibleList.length) return;
+    if (!playerStore.current && !playerStore.visibleList.length) return;
     e.preventDefault();
     togglePlay();
   }

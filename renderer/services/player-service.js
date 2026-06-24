@@ -12,6 +12,7 @@ export class PlayerService extends StoreService {
     this.audio = null; // injetado pelo renderer (o <audio> real)
     /** @type {object|null} */ this.current = null;
     /** @type {object[]} */ this.queue = [];
+    /** índice da faixa atual em `queue` (-1 = nada). */ this.queueIndex = -1;
     /** lista ordenada renderizada pela biblioteca = base da fila ao tocar um card. */
     /** @type {object[]} */ this.visibleList = [];
     // estado discreto consumido pelos componentes (sincronizado pelo renderer):
