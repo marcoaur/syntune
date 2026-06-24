@@ -28,7 +28,7 @@ Diferencial: pipeline de metadados **factual-first** (a IA nunca inventa sozinha
 | i18n | módulo próprio `i18n.js` + `locales/{en,pt}.json` |
 | Cripto | `crypto` (AES-256-GCM) + `safeStorage` (DPAPI/Keychain/Secret Service) |
 
-**Regra de dependências:** renderer bundlado (electron-vite). UI nova = web component **Lit** (`renderer/components/`, padrões em `_patterns/`); fora disso, preferir APIs nativas modernas (`fetch`, `URLSearchParams`, `CSS.escape`, etc.). Evitar libs novas no renderer sem justificativa; `lit`/`@lit/context` são devDependencies (inlinadas no bundle). No main process, libs Node/Electron OK se justificadas. Main/preload seguem **não-bundlados** na raiz (só o renderer é bundlado).
+**Regra de dependências:** renderer bundlado (electron-vite). UI nova = web component **Lit** (`renderer/components/`; os componentes existentes servem de referência por arquétipo); fora disso, preferir APIs nativas modernas (`fetch`, `URLSearchParams`, `CSS.escape`, etc.). Evitar libs novas no renderer sem justificativa; `lit`/`@lit/context` são devDependencies (inlinadas no bundle). No main process, libs Node/Electron OK se justificadas. Main/preload seguem **não-bundlados** na raiz (só o renderer é bundlado).
 
 ## 3. Taxonomia de badges (cabeçalho de cada arquivo)
 
