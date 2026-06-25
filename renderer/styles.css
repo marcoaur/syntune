@@ -818,13 +818,18 @@ img { -webkit-user-drag: none; user-drag: none; }
 .te-lyrics-teaser:empty + .te-lyrics-fade { display: none; }
 
 /* ---- Edição: drawer sobreposto (bottom sheet) ---- */
-/* palco fica inerte e escurecido atrás do drawer.
-   Só brightness (barato de animar) — NADA de blur: filtro de blur na view inteira
-   animando junto com o slide = engasgo. */
-.editor.edit-mode #editorView.te-view {
-  display: block; filter: brightness(0.45); pointer-events: none;
-  transition: filter 0.3s var(--ease);
+/* palco fica inerte e escurecido atrás do drawer. Dim via overlay (opacity) — NÃO via
+   `filter`: alternar filter na view inteira cria/destrói camada de composição e RECOMPÕE a
+   árvore, fazendo o drawer (camada própria, will-change) PISCAR ao subir. Opacity de pseudo
+   não recompõe. (Nem blur: filtro animando junto com o slide = engasgo.) */
+#editorView.te-view { position: relative; }
+.te-view::after {
+  content: ''; position: absolute; inset: 0; z-index: 5;
+  background: rgba(8, 8, 12, 0.6); opacity: 0; pointer-events: none;
+  transition: opacity 0.3s var(--ease);
 }
+.editor.edit-mode #editorView.te-view { display: block; pointer-events: none; }
+.editor.edit-mode .te-view::after { opacity: 1; }
 /* drawer sempre montado (translate controla a visibilidade → anima nos dois sentidos) */
 .editor.view-mode #editorEdit.te-drawer,
 .editor.edit-mode #editorEdit.te-drawer { display: block; }
@@ -851,12 +856,18 @@ img { -webkit-user-drag: none; user-drag: none; }
   -webkit-backdrop-filter: none; backdrop-filter: none;
 }
 .te-drawer .editor-body { max-width: 620px; margin: 0 auto; padding: 8px 26px 32px; }
-/* alça do drawer no topo */
-.te-drawer .editor-body::before {
-  content: ''; display: block;
-  width: 40px; height: 4px; margin: 6px auto 18px;
-  border-radius: 2px; background: rgba(255, 255, 255, 0.28);
+/* alça do drawer no topo = botão de recolher (desliza p/ baixo → só a view).
+   Botão com área de clique generosa; a pílula visual fica no ::before. */
+.te-handle {
+  display: block; width: 56px; margin: 2px auto 12px; padding: 8px 0;
+  border: none; background: none; cursor: pointer;
 }
+.te-handle::before {
+  content: ''; display: block; width: 40px; height: 5px; margin: 0 auto;
+  border-radius: 3px; background: rgba(255, 255, 255, 0.28);
+  transition: background 0.15s, width 0.15s;
+}
+.te-handle:hover::before { background: rgba(255, 255, 255, 0.5); width: 52px; }
 
 /* ---------- Editor (formulário) ---------- */
 .top-row { display: flex; gap: 18px; margin-bottom: 14px; align-items: flex-start; }
@@ -1271,9 +1282,10 @@ select.input { cursor: pointer; }
 .player-id:hover .player-cover { transform: scale(1.04); }
 /* indicação de "expandir" sobre a capa no hover */
 .player-expand {
-  position: absolute; left: 3px; top: 3px; width: 46px; height: 46px;
-  display: grid; place-items: center; border-radius: 10px;
+  position: absolute; inset: 0;          /* dentro da capa: o overflow:hidden recorta no mesmo raio */
+  display: grid; place-items: center;
   background: rgba(0, 0, 0, 0.42); color: #fff;
+  -webkit-backdrop-filter: blur(0.6px); backdrop-filter: blur(0.6px);
   opacity: 0; pointer-events: none; transition: opacity 0.18s var(--ease);
 }
 .player-expand svg { width: 18px; height: 18px; }
@@ -1811,7 +1823,12 @@ select.input { cursor: pointer; }
 
 .pl-seek, .np-seek, .pl-vol-range, #npVol {
   -webkit-appearance: none; appearance: none;
-  height: 5px; border-radius: 5px; cursor: pointer; outline: none;
+  height: 13px;                 /* caixa = altura do thumb → trilha+thumb centram juntos */
+  background: transparent; cursor: pointer; outline: none;
+}
+.pl-seek::-webkit-slider-runnable-track, .np-seek::-webkit-slider-runnable-track,
+.pl-vol-range::-webkit-slider-runnable-track, #npVol::-webkit-slider-runnable-track {
+  height: 5px; border-radius: 5px;
   background: linear-gradient(to right,
     var(--seek-fill) var(--fill, 0%), var(--seek-track) var(--fill, 0%));
   transition: height 0.15s var(--ease);
@@ -1821,10 +1838,13 @@ select.input { cursor: pointer; }
   -webkit-appearance: none; appearance: none;
   width: 13px; height: 13px; border-radius: 50%;
   background: #fff; box-shadow: 0 1px 5px rgba(0, 0, 0, 0.5);
-  margin-top: -4px;
+  margin-top: -4px;             /* (trilha 5 − thumb 13)/2 → centra o thumb na trilha */
   opacity: 0; transition: opacity 0.15s var(--ease), transform 0.12s var(--ease);
 }
-.pl-seek:hover, .np-seek:hover, .pl-vol-range:hover, #npVol:hover { height: 6px; }
+/* só os seeks crescem no hover; a barra de volume mantém tamanho FIXO (sem morph) */
+.pl-seek:hover::-webkit-slider-runnable-track, .np-seek:hover::-webkit-slider-runnable-track { height: 6px; }
+.pl-seek:hover::-webkit-slider-thumb, .np-seek:hover::-webkit-slider-thumb { margin-top: -3.5px; }
+/* thumb aparece no hover em todos (volume permanece -4px → centrado na trilha de 5px) */
 .pl-seek:hover::-webkit-slider-thumb, .np-seek:hover::-webkit-slider-thumb,
 .pl-vol-range:hover::-webkit-slider-thumb, #npVol:hover::-webkit-slider-thumb { opacity: 1; }
 .pl-seek:active::-webkit-slider-thumb, .np-seek:active::-webkit-slider-thumb { transform: scale(1.18); }

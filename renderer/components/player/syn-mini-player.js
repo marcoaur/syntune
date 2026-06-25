@@ -64,6 +64,7 @@ export class SynMiniPlayer extends LitElement {
     if (changed.has('player') && this.player && !this._unsub) {
       this._unsub = this.player.onChange(() => this.requestUpdate());
     }
+    fill(this.querySelector('.pl-vol-range')); // reflete o volume atual na trilha
   }
 
   // hot-path: posição do seek + tempos por frame (sem re-render)
@@ -95,7 +96,7 @@ export class SynMiniPlayer extends LitElement {
     const host = seek.parentElement.getBoundingClientRect();
     tip.style.left = (e.clientX - host.left) + 'px';
   }
-  #vol(e) { const p = this.player; if (p) p.setVolume(parseFloat(e.target.value)); }
+  #vol(e) { const p = this.player; if (p) p.setVolume(parseFloat(e.target.value)); fill(e.target); }
   #volWheel(e) {
     e.preventDefault();
     const p = this.player; if (!p) return;
@@ -116,8 +117,8 @@ export class SynMiniPlayer extends LitElement {
         <div class="player-id" title=${this.#tr('player.openNow')} @click=${() => p.openNowPlaying && p.openNowPlaying()}>
           <div class="player-cover" @wheel=${(e) => this.#volWheel(e)}>
             ${p.coverUrl ? html`<img alt="" src=${p.coverUrl} />` : html`<span class="ph">♪</span>`}
+            <span class="player-expand"><syn-icon name="expandUp"></syn-icon></span>
           </div>
-          <span class="player-expand"><syn-icon name="expandUp"></syn-icon></span>
           <div class="player-text">
             <div class="player-title">${p.title || '—'}</div>
             <div class="player-artist">${p.artist || ''}</div>

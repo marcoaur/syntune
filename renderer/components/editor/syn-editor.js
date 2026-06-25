@@ -56,6 +56,7 @@ export class SynEditor extends HTMLElement {
       const hit = (id) => e.target.closest('#' + id);
       if (hit('editorBack'))      { this.#hide(); return; }
       if (hit('editToggle'))      { this.#g('editor').classList.remove('view-mode'); this.#g('editor').classList.add('edit-mode'); return; }
+      if (hit('editDrawerBack'))  { this.onEscape(); return; } // desliza o drawer p/ baixo → só a view
       if (hit('editDone'))        { this.#save(); return; }
       if (hit('evPlay'))          { if (this.currentEditorSong) this.#emit('syn:player:play', { song: this.currentEditorSong }); return; }
       if (hit('removeImageBtn'))  { this.#resetCover(); return; }
@@ -112,8 +113,8 @@ export class SynEditor extends HTMLElement {
     this.currentFilePath = song.filePath;
     this.currentEditorSong = song;
     this.currentYtContext = null;
-    loading().show(this.t('editor.readingMeta'));
-    await this.#paint();
+    // ponytail: sem overlay de loading no readTags local (rápido) — o overlay piscava a cada
+    // abertura. Se ler tag ficar lento (drive de rede), reintroduzir como spinner com delay.
     try {
       const tags = await window.api.readTags(song.filePath);
       if (tags.error) { this.toast(tags.error, 'error'); return; }
@@ -137,7 +138,7 @@ export class SynEditor extends HTMLElement {
       this.#show();
     } catch (err) {
       this.toast(this.t('editor.openFail', { msg: (err && err.message ? err.message : err) }), 'error');
-    } finally { loading().hide(); }
+    }
   }
 
   // ---- visualização (somente leitura) ----
