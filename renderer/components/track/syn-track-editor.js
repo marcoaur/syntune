@@ -138,6 +138,7 @@ export class SynTrackEditor extends SyntuneElement {
         <!-- ===== EDIT = drawer sobreposto (metadata + capa + IA) ===== -->
         <div id="editorEdit" class="editor-edit te-drawer">
           <div class="editor-body">
+            <button id="editDrawerBack" class="te-handle" title=${t('common.back')} aria-label=${t('common.back')}></button>
             <div class="top-row">
               <div class="cover-col">
                 <div id="coverPreview" class="cover-preview" tabindex="0" title=${t('editor.coverPasteTitle')}>
