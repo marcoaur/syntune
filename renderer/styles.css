@@ -46,8 +46,10 @@
   --hover: rgba(20, 20, 45, 0.05);
 }
 
-/* ---------- Tema escuro (acompanha o sistema) ---------- */
-@media (prefers-color-scheme: dark) {
+/* ---------- Tema escuro (forçado, ignora o sistema) ---------- */
+/* ponytail: @media all sempre casa → escuro sempre vence o :root claro acima.
+   Para voltar a seguir o SO: trocar por (prefers-color-scheme: dark). */
+@media all {
   :root {
     --text: #f3f3f7;
     --text-dim: #9a9aa8;
@@ -2619,9 +2621,11 @@ button, input, select, textarea, .switch,
 .queue-panel.np-mode .qi-remove:hover { color: #ff8a80; }
 
 /* ============================================================
-   TEMA CLARO IMERSIVO — o palco acompanha o tema do sistema
+   TEMA CLARO IMERSIVO — desativado (escuro forçado)
    ============================================================ */
-@media (prefers-color-scheme: light) {
+/* ponytail: @media not all nunca casa → bloco claro nunca aplica.
+   Para reativar o tema claro do SO: trocar por (prefers-color-scheme: light). */
+@media not all {
   .content {
     --text: #16161d;
     --text-dim: rgba(22, 22, 29, 0.55);
